@@ -109,6 +109,37 @@ function setApprovedSellers(rows) {
   writeStorageArray(STORAGE_KEYS.approvedSellers, rows);
 }
 
+async function syncApprovedSellerPasswordToServer(sellerId, password) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ password }),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "비밀번호 초기화에 실패했습니다.");
+    return false;
+  }
+
+  await loadAdminDataFromServer();
+  renderAll();
+  return true;
+}
+
+async function syncApprovedSellerDeleteToServer(sellerId) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "DELETE",
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "승인 판매자 삭제에 실패했습니다.");
+    return false;
+  }
+
+  await loadAdminDataFromServer();
+  renderAll();
+  return true;
+}
+
 function getMessages() {
   return readStorageArray(STORAGE_KEYS.alimtalkQueue);
 }
@@ -214,7 +245,7 @@ function getSelectedApplication() {
   return selected || applications[0];
 }
 
-function renderStats() {
+function renderStatsCards() {
   const applications = getApplications();
   const approved = getApprovedSellers();
   const messages = getMessages();
@@ -232,6 +263,33 @@ function renderStats() {
     .map((stat) => {
       return `
         <article class="stat-card">
+          <span>${stat.label}</span>
+          <strong>${stat.value}</strong>
+          <p>${stat.note}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderStats() {
+  const applications = getApplications();
+  const approved = getApprovedSellers();
+  const messages = getMessages();
+  const pendingCount = applications.filter((row) => row.status === "pending").length;
+  const readyMessages = messages.filter((row) => row.status === "ready").length;
+  const sentMessages = messages.filter((row) => row.status === "sent").length;
+  const rejectedCount = applications.filter((row) => row.status === "rejected").length;
+
+  statGrid.innerHTML = [
+    { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
+    { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
+    { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
+  ]
+    .map((stat) => {
+      return `
+        <article class="stat-card stat-action" data-stat-action="${stat.action}" role="button" tabindex="0">
           <span>${stat.label}</span>
           <strong>${stat.value}</strong>
           <p>${stat.note}</p>
@@ -423,6 +481,13 @@ function queueManualApplicationTalk(applicationId) {
 
 function renderApprovedSellers() {
   const approved = getApprovedSellers();
+  const headerRow = approvedSellerRows.closest("table")?.querySelector("thead tr");
+  if (headerRow && headerRow.children.length < 5) {
+    const manageHeader = document.createElement("th");
+    manageHeader.textContent = "관리";
+    headerRow.appendChild(manageHeader);
+  }
+
   approvedSellerRows.innerHTML = approved.length
     ? approved
         .map((seller) => {
@@ -432,6 +497,12 @@ function renderApprovedSellers() {
               <td>${escapeHTML(managerName(seller))}</td>
               <td>${escapeHTML(seller.branchRegion || "지역 미등록")}</td>
               <td>${escapeHTML(seller.sellerId)}</td>
+              <td>
+                <div class="table-actions">
+                  <button class="plain-btn small-btn" type="button" data-reset-approved-password="${escapeHTML(seller.id)}">비밀번호 초기화</button>
+                  <button class="danger-btn small-btn" type="button" data-delete-approved-seller="${escapeHTML(seller.id)}">삭제</button>
+                </div>
+              </td>
             </tr>
           `;
         })
@@ -527,9 +598,79 @@ function resendMessage(messageId) {
   renderAll();
 }
 
+async function resetApprovedSellerPassword(sellerId) {
+  const seller = getApprovedSellers().find((row) => row.id === sellerId);
+  if (!seller) return;
+
+  const nextPassword = window.prompt(`${sellerName(seller) || seller.sellerId} 새 비밀번호를 입력해주세요.`, "");
+  if (nextPassword === null) return;
+
+  if (String(nextPassword).trim().length < 4) {
+    showToast("새 비밀번호는 4자 이상으로 입력해주세요.");
+    return;
+  }
+
+  const rows = getApprovedSellers();
+  const target = rows.find((row) => row.id === sellerId);
+  if (target) target.password = String(nextPassword).trim();
+  setApprovedSellers(rows);
+  renderAll();
+
+  const ok = await syncApprovedSellerPasswordToServer(sellerId, String(nextPassword).trim());
+  showToast(ok ? "비밀번호가 초기화되었습니다." : "비밀번호 초기화에 실패했습니다.");
+}
+
+async function deleteApprovedSeller(sellerId) {
+  const seller = getApprovedSellers().find((row) => row.id === sellerId);
+  if (!seller) return;
+
+  const confirmed = window.confirm(`${sellerName(seller) || seller.sellerId} 판매자를 삭제할까요?\n삭제하면 해당 아이디로 판매자 로그인을 할 수 없습니다.`);
+  if (!confirmed) return;
+
+  setApprovedSellers(getApprovedSellers().filter((row) => row.id !== sellerId));
+  renderAll();
+
+  const ok = await syncApprovedSellerDeleteToServer(sellerId);
+  showToast(ok ? "승인 판매자를 삭제했습니다." : "승인 판매자 삭제에 실패했습니다.");
+}
+
+
+function scrollToAdminSection(selector) {
+  document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function openStatAction(action) {
+  if (action === "pending-applications") {
+    applicationFilter = "pending";
+    selectedApplicationId = "";
+    renderAll();
+    scrollToAdminSection("#applications");
+    return;
+  }
+
+  if (action === "approved-sellers") {
+    renderAll();
+    scrollToAdminSection("#approvedSellers");
+    return;
+  }
+
+  if (action === "ready-messages") {
+    messageFilter = "ready";
+    renderAll();
+    scrollToAdminSection("#messages");
+    return;
+  }
+
+  if (action === "rejected-applications") {
+    applicationFilter = "rejected";
+    selectedApplicationId = "";
+    renderAll();
+    scrollToAdminSection("#applications");
+  }
+}
 
 function renderAll() {
-  renderStats();
+  renderStatsCards();
   renderApplications();
   renderApprovedSellers();
   renderMessages();
@@ -543,6 +684,12 @@ function renderAll() {
 }
 
 document.addEventListener("click", (event) => {
+  const statAction = event.target.closest("[data-stat-action]");
+  if (statAction) {
+    openStatAction(statAction.dataset.statAction);
+    return;
+  }
+
   const applicationCard = event.target.closest("[data-application-id]");
   if (applicationCard) {
     selectedApplicationId = applicationCard.dataset.applicationId;
@@ -598,7 +745,29 @@ document.addEventListener("click", (event) => {
   const resendButton = event.target.closest("[data-resend-message]");
   if (resendButton) {
     resendMessage(resendButton.dataset.resendMessage);
+    return;
   }
+
+  const resetApprovedPasswordButton = event.target.closest("[data-reset-approved-password]");
+  if (resetApprovedPasswordButton) {
+    resetApprovedSellerPassword(resetApprovedPasswordButton.dataset.resetApprovedPassword);
+    return;
+  }
+
+  const deleteApprovedSellerButton = event.target.closest("[data-delete-approved-seller]");
+  if (deleteApprovedSellerButton) {
+    deleteApprovedSeller(deleteApprovedSellerButton.dataset.deleteApprovedSeller);
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+
+  const statAction = event.target.closest("[data-stat-action]");
+  if (!statAction) return;
+
+  event.preventDefault();
+  openStatAction(statAction.dataset.statAction);
 });
 
 applicationSearch.addEventListener("input", () => {

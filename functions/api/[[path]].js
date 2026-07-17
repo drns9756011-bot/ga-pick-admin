@@ -1,7 +1,7 @@
 const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -313,6 +313,32 @@ async function getApprovedSellers(env) {
   return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
 }
 
+async function updateApprovedSeller(env, request, id) {
+  const body = await request.json();
+  const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
+  if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
+
+  const nextPassword = String(body.password || "").trim();
+  if (nextPassword.length < 4) {
+    return json({ ok: false, message: "새 비밀번호는 4자 이상으로 입력해주세요." }, 400);
+  }
+
+  await env.DB.prepare("UPDATE approved_sellers SET password = ? WHERE id = ?").bind(nextPassword, id).run();
+  const row = normalizeApprovedSeller(
+    await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first()
+  );
+
+  return json({ ok: true, row });
+}
+
+async function deleteApprovedSeller(env, id) {
+  const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
+  if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
+
+  await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
+  return json({ ok: true, id });
+}
+
 async function getAlimtalk(env) {
   const result = await env.DB.prepare("SELECT * FROM alimtalk_queue ORDER BY created_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeMessage) });
@@ -379,6 +405,12 @@ export async function onRequest(context) {
   }
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
+  if (path.startsWith("approved-sellers/") && method === "PATCH") {
+    return updateApprovedSeller(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
+  if (path.startsWith("approved-sellers/") && method === "DELETE") {
+    return deleteApprovedSeller(env, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
 
   if (path === "alimtalk" && method === "GET") return getAlimtalk(env);
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);

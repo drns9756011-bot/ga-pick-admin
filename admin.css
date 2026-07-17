@@ -436,6 +436,44 @@ button.application-card.is-active {
   color: var(--danger);
 }
 
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.small-btn {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.danger-btn {
+  border: 1px solid #f2b8b5;
+  border-radius: 8px;
+  background: #fff5f4;
+  color: var(--danger);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.danger-btn:hover {
+  background: #fdecea;
+}
+
+.stat-action {
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.stat-action:hover,
+.stat-action:focus-visible {
+  border-color: rgba(18, 121, 102, 0.45);
+  box-shadow: 0 14px 30px rgba(17, 24, 39, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .detail-panel {
   display: grid;
   gap: 14px;
