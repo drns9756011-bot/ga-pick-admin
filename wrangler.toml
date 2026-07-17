@@ -1,12 +1,5 @@
-name = "ga-pick"
+name = "ga-pick-admin"
 compatibility_date = "2026-07-17"
-pages_build_output_dir = "."
 
-[[d1_databases]]
-binding = "DB"
-database_name = "ga-pick-db"
-database_id = "CLOUDFLARE_D1_DATABASE_ID를_여기에_넣으세요"
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "ga-pick-files"
+[assets]
+directory = "."
