@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>픽견적 관리자</title>
-    <meta name="description" content="픽견적 판매자 승인, 반려, 알림톡 발송을 관리하는 관리자 페이지입니다." />
+    <meta name="description" content="픽견적 판매자 신청, 승인, 반려, 알림톡 발송을 관리하는 관리자 페이지입니다." />
     <link rel="stylesheet" href="admin.css" />
     <script defer src="admin.js"></script>
   </head>
   <body>
     <aside class="sidebar">
       <a class="brand" href="#sellerReview" aria-label="픽견적 관리자 홈">
-        <span class="brand-mark">픽</span>
+        <span class="brand-mark">P</span>
         <span>
           픽견적
           <small>관리자 콘솔</small>
@@ -19,9 +19,9 @@
       </a>
       <nav class="side-nav" aria-label="관리자 메뉴">
         <span class="nav-label">업무 메뉴</span>
-        <a href="#sellerReview">판매자 승인</a>
-        <a href="#alimtalkControl">알림톡 발송</a>
-        <a href="#approvedSellers">승인 판매자</a>
+        <a href="#sellerReview">판매자 신청 검토</a>
+        <a href="#alimtalkControl">알림톡 발송 관리</a>
+        <a href="#approvedSellers">승인 판매자 목록</a>
       </nav>
       <a class="home-link" href="/">서비스 화면으로</a>
     </aside>
@@ -29,9 +29,9 @@
     <main class="admin-shell">
       <header class="admin-header">
         <div>
-          <p class="eyebrow">Back office</p>
-          <h1>판매자 승인과 알림톡 발송 관리</h1>
-          <p class="header-copy">등록 신청을 검토하고 승인, 반려, 안내 발송까지 한 화면에서 처리합니다.</p>
+          <p class="eyebrow">Back Office</p>
+          <h1>판매자 신청과 알림 발송을 한곳에서 관리하세요.</h1>
+          <p class="header-copy">판매자 등록 신청을 검토하고 승인, 반려, 안내 메시지 발송까지 관리자 화면에서 처리합니다.</p>
         </div>
         <div class="admin-actions">
           <button class="ghost-btn" id="seedDemoBtn" type="button">데모 신청 추가</button>
@@ -45,7 +45,7 @@
         <section class="panel queue-panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Seller review</p>
+              <p class="eyebrow">Seller Review</p>
               <h2>판매자 등록 신청</h2>
             </div>
             <div class="segmented" aria-label="신청 상태 필터">
@@ -57,7 +57,7 @@
           </div>
           <label class="search-box">
             신청 검색
-            <input id="applicationSearch" type="search" placeholder="지점, 매니저, 아이디, 연락처" />
+            <input id="applicationSearch" type="search" placeholder="지점, 매니저, 아이디, 연락처 검색" />
           </label>
           <div class="application-list" id="applicationList"></div>
         </section>
@@ -84,7 +84,7 @@
         <section class="panel" id="approvedSellers">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Approved sellers</p>
+              <p class="eyebrow">Approved Sellers</p>
               <h2>승인 판매자</h2>
             </div>
           </div>
