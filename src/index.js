@@ -10,7 +10,7 @@ export default {
         env,
         ctx,
         params: {
-          path: url.pathname.replace(/^\/api\/?/, ""),
+          path: url.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean),
         },
       });
     }

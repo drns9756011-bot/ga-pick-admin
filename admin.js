@@ -17,7 +17,6 @@ const approvedSellerRows = document.querySelector("#approvedSellerRows");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
-const seedDemoBtn = document.querySelector("#seedDemoBtn");
 
 function canUseApiServer() {
   return window.location.protocol !== "file:";
@@ -528,36 +527,6 @@ function resendMessage(messageId) {
   renderAll();
 }
 
-function addDemoApplication() {
-  const applications = getApplications();
-  const demoId = `seller-demo-${Date.now()}`;
-  applications.unshift({
-    id: demoId,
-    status: "pending",
-    requestedAt: new Date().toISOString(),
-    reviewedAt: "",
-    reviewMemo: "",
-    sellerId: `demo_${String(Date.now()).slice(-4)}`,
-    password: "1234",
-    channel: "LG전자 BEST SHOP",
-    branch: "잠실점",
-    branchRegion: "서울",
-    manager: "김관리",
-    managerPosition: "매니저",
-    phone: "010-2468-1357",
-    cardImage: "",
-    memo: "혼수 가전 견적 제안 참여를 희망합니다.",
-    consent: {
-      privacyUse: true,
-      customerDisclosure: true,
-      agreedAt: new Date().toISOString(),
-    },
-  });
-  setApplications(applications);
-  selectedApplicationId = demoId;
-  showToast("데모 판매자 신청을 추가했습니다.");
-  renderAll();
-}
 
 function renderAll() {
   renderStats();
@@ -643,7 +612,6 @@ refreshBtn.addEventListener("click", async () => {
   showToast("관리자 데이터를 다시 불러왔습니다.");
 });
 
-seedDemoBtn.addEventListener("click", addDemoApplication);
 
 window.addEventListener("storage", (event) => {
   if (!Object.values(STORAGE_KEYS).includes(event.key)) return;
