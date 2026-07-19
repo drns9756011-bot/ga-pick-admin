@@ -971,6 +971,81 @@ td {
   border-radius: 8px;
 }
 
+.accordion-panel > .panel-head {
+  cursor: pointer;
+}
+
+.accordion-panel > .panel-head:hover {
+  background: #f7fafb;
+}
+
+.accordion-body {
+  display: grid;
+  gap: 0;
+}
+
+.accordion-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.accordion-toggle:hover,
+.accordion-toggle:focus-visible {
+  border-color: rgba(18, 107, 93, 0.42);
+  outline: none;
+}
+
+.accordion-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.accordion-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #eef4f2;
+  color: var(--primary);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.18s ease;
+}
+
+.accordion-panel.is-open .accordion-icon {
+  transform: rotate(180deg);
+}
+
+.accordion-panel.is-collapsed {
+  box-shadow: none;
+}
+
+.accordion-panel.is-collapsed > .panel-head {
+  border-bottom: 0;
+}
+
+.accordion-panel.is-collapsed .panel-note,
+.accordion-panel.is-collapsed .segmented {
+  display: none;
+}
+
+.accordion-panel.is-collapsed.detail-panel {
+  padding: 0;
+}
+
+.accordion-panel.is-collapsed.detail-panel > .panel-head {
+  padding: 18px 20px;
+}
+
 @media (max-width: 1220px) {
   .stat-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
