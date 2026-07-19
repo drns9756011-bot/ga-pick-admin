@@ -971,19 +971,23 @@ td {
   border-radius: 8px;
 }
 
+.admin-data-section > .panel-head,
 .accordion-panel > .panel-head {
   cursor: pointer;
 }
 
+.admin-data-section > .panel-head:hover,
 .accordion-panel > .panel-head:hover {
   background: #f7fafb;
 }
 
+.section-body,
 .accordion-body {
   display: grid;
   gap: 0;
 }
 
+.section-open-button,
 .accordion-toggle {
   display: inline-flex;
   align-items: center;
@@ -997,15 +1001,30 @@ td {
   font-weight: 900;
 }
 
+.section-open-button:hover,
+.section-open-button:focus-visible,
 .accordion-toggle:hover,
 .accordion-toggle:focus-visible {
   border-color: rgba(18, 107, 93, 0.42);
   outline: none;
 }
 
+.section-count,
 .accordion-count {
   color: var(--muted);
   font-size: 12px;
+}
+
+.section-icon {
+  display: inline-grid;
+  min-width: 40px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #eef4f2;
+  color: var(--primary);
+  font-size: 12px;
+  line-height: 1;
 }
 
 .accordion-icon {
@@ -1044,6 +1063,37 @@ td {
 
 .accordion-panel.is-collapsed.detail-panel > .panel-head {
   padding: 18px 20px;
+}
+
+.admin-data-section.is-summary-section {
+  box-shadow: none;
+}
+
+.admin-data-section.is-summary-section > .panel-head {
+  border-bottom: 0;
+}
+
+.admin-data-section.is-summary-section .panel-note,
+.admin-data-section.is-summary-section .segmented {
+  display: none;
+}
+
+.admin-data-section.is-active-section {
+  border-color: rgba(18, 107, 93, 0.28);
+}
+
+.admin-data-section.is-active-section > .panel-head {
+  background:
+    linear-gradient(135deg, rgba(18, 107, 93, 0.08), rgba(255, 255, 255, 0) 48%),
+    #fff;
+}
+
+.detail-panel[hidden] {
+  display: none !important;
+}
+
+.workspace {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (max-width: 1220px) {
