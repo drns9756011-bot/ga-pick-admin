@@ -2,6 +2,7 @@ const STORAGE_KEYS = {
   sellerApplications: "pickquoteSellerApplications",
   approvedSellers: "pickquoteApprovedSellers",
   alimtalkQueue: "pickquoteAlimtalkQueue",
+  customerQuotes: "pickquoteCustomerQuotes",
 };
 
 let applicationFilter = "pending";
@@ -17,6 +18,28 @@ const approvedSellerRows = document.querySelector("#approvedSellerRows");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
+document.querySelector(".home-link")?.setAttribute("href", "https://ga-pick.com/");
+document.querySelector(".home-link")?.setAttribute("target", "_blank");
+document.querySelector(".home-link")?.setAttribute("rel", "noopener");
+if (document.querySelector(".home-link")) {
+  document.querySelector(".home-link").textContent = "서비스 화면으로";
+}
+
+const customerQuoteSection = document.createElement("section");
+customerQuoteSection.className = "panel";
+customerQuoteSection.id = "customerQuotes";
+customerQuoteSection.innerHTML = `
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Customer Quotes</p>
+      <h2>고객 견적 서버 저장 현황</h2>
+    </div>
+    <p class="panel-note">고객님 견적 저장 여부와 알림톡 발송 상태를 확인합니다.</p>
+  </div>
+  <div class="quote-admin-list" id="customerQuoteList"></div>
+`;
+document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
+const customerQuoteList = document.querySelector("#customerQuoteList");
 
 function canUseApiServer() {
   return window.location.protocol !== "file:";
@@ -42,10 +65,11 @@ async function apiJson(path, options = {}) {
 }
 
 async function loadAdminDataFromServer() {
-  const [applications, approvedSellers, messages] = await Promise.all([
+  const [applications, approvedSellers, messages, customerQuotes] = await Promise.all([
     apiJson("/api/seller-applications"),
     apiJson("/api/approved-sellers"),
     apiJson("/api/alimtalk"),
+    apiJson("/api/customer-quotes"),
   ]);
 
   if (applications?.ok && Array.isArray(applications.rows)) {
@@ -58,6 +82,10 @@ async function loadAdminDataFromServer() {
 
   if (messages?.ok && Array.isArray(messages.rows)) {
     writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
+  }
+
+  if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
+    writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
   }
 }
 
@@ -146,6 +174,10 @@ function getMessages() {
 
 function setMessages(rows) {
   writeStorageArray(STORAGE_KEYS.alimtalkQueue, rows);
+}
+
+function getCustomerQuotes() {
+  return readStorageArray(STORAGE_KEYS.customerQuotes);
 }
 
 function escapeHTML(value) {
@@ -514,6 +546,94 @@ function renderApprovedSellers() {
     `;
 }
 
+function getMessagesForQuote(quoteId) {
+  return getMessages().filter((message) => message.relatedId === quoteId);
+}
+
+function quoteAlimtalkStatus(quote) {
+  const related = getMessagesForQuote(quote.id);
+  if (!related.length) return { label: "알림톡 없음", className: "canceled" };
+  if (related.some((message) => message.status === "sent")) return { label: "발송완료", className: "sent" };
+  if (related.some((message) => message.status === "ready")) return { label: "발송대기", className: "ready" };
+  if (related.some((message) => message.status === "canceled")) return { label: "취소", className: "canceled" };
+  return { label: "확인필요", className: "pending" };
+}
+
+function renderCustomerQuotes() {
+  if (!customerQuoteList) return;
+
+  const quotes = getCustomerQuotes();
+  customerQuoteList.innerHTML = quotes.length
+    ? quotes
+        .map((quote) => {
+          const status = quoteAlimtalkStatus(quote);
+          const imagesCount = Array.isArray(quote.images) ? quote.images.length : 0;
+          return `
+            <article class="quote-admin-card">
+              <div class="quote-admin-thumb">
+                ${
+                  quote.thumbnailImage || quote.image
+                    ? `<img src="${escapeHTML(quote.thumbnailImage || quote.image)}" alt="대표 견적 이미지" />`
+                    : `<span>대표 이미지 없음</span>`
+                }
+              </div>
+              <div class="quote-admin-body">
+                <div class="message-top">
+                  <div>
+                    <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
+                    <span>${escapeHTML(quote.customer || "고객님")} · ${escapeHTML(formatPhoneNumber(quote.phone))}</span>
+                  </div>
+                  <span class="status ${status.className}">${status.label}</span>
+                </div>
+                <div class="quote-admin-meta">
+                  <span>견적번호 ${escapeHTML(quote.quoteNumber || "-")}</span>
+                  <span>저장 ${escapeHTML(formatDate(quote.createdAt))}</span>
+                  <span>제안 가능 ${escapeHTML(formatDate(quote.quoteExpiresAt))}까지</span>
+                  <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
+                  <span>대표 이미지/고객 정보 1년 보관</span>
+                </div>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `
+      <div class="empty-state">
+        <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
+        <p>노출용에서 고객님 견적을 등록하면 여기에 저장 현황과 알림톡 상태가 표시됩니다.</p>
+      </div>
+    `;
+}
+
+function renderDashboardStats() {
+  const applications = getApplications();
+  const approved = getApprovedSellers();
+  const messages = getMessages();
+  const customerQuotes = getCustomerQuotes();
+  const pendingCount = applications.filter((row) => row.status === "pending").length;
+  const readyMessages = messages.filter((row) => row.status === "ready").length;
+  const sentMessages = messages.filter((row) => row.status === "sent").length;
+  const rejectedCount = applications.filter((row) => row.status === "rejected").length;
+
+  statGrid.innerHTML = [
+    { label: "고객 견적", value: `${customerQuotes.length}건`, note: "서버 저장된 견적", action: "customer-quotes" },
+    { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
+    { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
+    { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
+  ]
+    .map((stat) => {
+      return `
+        <article class="stat-card stat-action" data-stat-action="${stat.action}" role="button" tabindex="0">
+          <span>${stat.label}</span>
+          <strong>${stat.value}</strong>
+          <p>${stat.note}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function getFilteredMessages() {
   return getMessages().filter((message) => messageFilter === "all" || message.status === messageFilter);
 }
@@ -640,6 +760,12 @@ function scrollToAdminSection(selector) {
 }
 
 function openStatAction(action) {
+  if (action === "customer-quotes") {
+    renderAll();
+    scrollToAdminSection("#customerQuotes");
+    return;
+  }
+
   if (action === "pending-applications") {
     applicationFilter = "pending";
     selectedApplicationId = "";
@@ -670,7 +796,8 @@ function openStatAction(action) {
 }
 
 function renderAll() {
-  renderStatsCards();
+  renderDashboardStats();
+  renderCustomerQuotes();
   renderApplications();
   renderApprovedSellers();
   renderMessages();

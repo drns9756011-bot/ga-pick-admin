@@ -14,6 +14,16 @@
   --shadow: 0 10px 28px rgba(20, 33, 45, 0.08);
 }
 
+@media (max-width: 640px) {
+  .quote-admin-card {
+    grid-template-columns: 1fr;
+  }
+
+  .quote-admin-thumb {
+    min-height: 180px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -403,6 +413,71 @@ button.application-card.is-active {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.62;
+}
+
+.panel-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.quote-admin-list {
+  display: grid;
+  gap: 12px;
+}
+
+.quote-admin-card {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.quote-admin-thumb {
+  display: grid;
+  place-items: center;
+  min-height: 104px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eef2f6;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.quote-admin-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.quote-admin-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.quote-admin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quote-admin-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #f4f7fa;
+  color: #5f6d7a;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .status {

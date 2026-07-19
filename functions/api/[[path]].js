@@ -97,6 +97,33 @@ function parseJson(value, fallback) {
   }
 }
 
+function normalizeCustomerQuote(row, images = []) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    quoteNumber: row.quote_number,
+    customer: row.customer,
+    phone: row.phone,
+    items: row.items,
+    purchasePurpose: row.purchase_purpose || "",
+    price: Number(row.price || 0),
+    region: row.region || "",
+    memo: row.memo || "",
+    status: row.status || "open",
+    selectedBidId: row.selected_bid_id || null,
+    saleCompletedAt: row.sale_completed_at || "",
+    thumbnailImage: row.thumbnail_image || "",
+    thumbnailImageKey: row.thumbnail_image_key || "",
+    quoteExpiresAt: row.quote_expires_at || "",
+    fullImagesExpiresAt: row.full_images_expires_at || "",
+    personalExpiresAt: row.personal_expires_at || "",
+    createdAt: row.created_at || "",
+    consent: parseJson(row.consent_json, {}),
+    image: images[0]?.url || row.thumbnail_image || "",
+    images: images.length ? images.map((image) => image.url) : row.thumbnail_image ? [row.thumbnail_image] : [],
+  };
+}
+
 function dataUrlInfo(dataUrl) {
   const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
   if (!match) return null;
@@ -313,6 +340,52 @@ async function getApprovedSellers(env) {
   return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
 }
 
+async function ensureCustomerQuoteColumns(env) {
+  const statements = [
+    "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image_key TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN quote_expires_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN full_images_expires_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN personal_expires_at TEXT DEFAULT ''",
+    "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
+    "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
+  ];
+
+  await Promise.all(
+    statements.map(async (statement) => {
+      try {
+        await env.DB.prepare(statement).run();
+      } catch (error) {
+        // Already migrated.
+      }
+    })
+  );
+}
+
+async function getQuoteImages(env, quoteId) {
+  const result = await env.DB.prepare(
+    `SELECT * FROM quote_images
+     WHERE quote_id = ?
+     ORDER BY sort_order ASC`
+  )
+    .bind(quoteId)
+    .all();
+  return result.results || [];
+}
+
+async function getCustomerQuotes(env) {
+  await ensureCustomerQuoteColumns(env);
+  const result = await env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all();
+  const rows = [];
+
+  for (const quote of result.results || []) {
+    const images = await getQuoteImages(env, quote.id);
+    rows.push(normalizeCustomerQuote(quote, images));
+  }
+
+  return json({ ok: true, rows });
+}
+
 async function updateApprovedSeller(env, request, id) {
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
@@ -405,6 +478,7 @@ export async function onRequest(context) {
   }
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
+  if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
   if (path.startsWith("approved-sellers/") && method === "PATCH") {
     return updateApprovedSeller(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
