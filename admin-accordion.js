@@ -121,7 +121,78 @@
     writeOpenSections(openSections);
   }
 
+  function openPanels(panelIds) {
+    const ids = Array.isArray(panelIds) ? panelIds : [panelIds];
+    const openSections = readOpenSections();
+
+    sectionIds.forEach((id) => {
+      const panel = document.getElementById(id);
+      if (!panel) return;
+      setOpen(panel, ids.includes(id), openSections);
+      updateCount(panel);
+    });
+
+    writeOpenSections(openSections);
+    const firstPanel = document.getElementById(ids[0]);
+    firstPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function setAdminFilter(type, value) {
+    try {
+      if (type === "application") applicationFilter = value;
+      if (type === "message") messageFilter = value;
+    } catch (error) {
+      // The base admin script owns these filters.
+    }
+  }
+
+  function openStatData(action) {
+    if (action === "customer-quotes") {
+      window.renderAll?.();
+      setTimeout(() => openPanels("customerQuotes"), 30);
+      return true;
+    }
+
+    if (action === "pending-applications") {
+      setAdminFilter("application", "pending");
+      window.renderAll?.();
+      setTimeout(() => openPanels("applications"), 30);
+      return true;
+    }
+
+    if (action === "approved-sellers") {
+      window.renderAll?.();
+      setTimeout(() => openPanels("approvedSellers"), 30);
+      return true;
+    }
+
+    if (action === "ready-messages") {
+      setAdminFilter("message", "ready");
+      window.renderAll?.();
+      setTimeout(() => openPanels("alimtalkControl"), 30);
+      return true;
+    }
+
+    if (action === "rejected-applications") {
+      setAdminFilter("application", "rejected");
+      window.renderAll?.();
+      setTimeout(() => openPanels("applications"), 30);
+      return true;
+    }
+
+    return false;
+  }
+
+  window.openAdminDataSection = openPanels;
+
   document.addEventListener("click", (event) => {
+    const stat = event.target.closest("[data-stat-action]");
+    if (stat && openStatData(stat.dataset.statAction)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
     const button = event.target.closest(".accordion-toggle");
     if (button) {
       const panel = button.closest(".accordion-panel");
@@ -134,6 +205,17 @@
     if (event.target.closest("button, a, input, select, textarea, label")) return;
     togglePanel(head.closest(".accordion-panel"));
   });
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      const stat = event.target.closest("[data-stat-action]");
+      if (!stat || !openStatData(stat.dataset.statAction)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    },
+    true
+  );
 
   const originalRenderAll = window.renderAll;
   if (typeof originalRenderAll === "function") {
