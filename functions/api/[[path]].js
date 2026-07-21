@@ -88,6 +88,7 @@ function normalizeMessage(row) {
     solapiGroupId: row.solapi_group_id || "",
     solapiMessageId: row.solapi_message_id || "",
     errorMessage: row.error_message || "",
+    solapiResponse: parseJson(row.solapi_response_json, null),
     createdAt: row.created_at || "",
     sentAt: row.sent_at || "",
     canceledAt: row.canceled_at || "",

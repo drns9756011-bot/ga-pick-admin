@@ -635,11 +635,28 @@ function getFilteredMessages() {
   return getMessages().filter((message) => messageFilter === "all" || message.status === messageFilter);
 }
 
+function summarizeSolapiResponse(response) {
+  if (!response) return "";
+  const group = response.groupInfo || response;
+  const firstMessage = response.messageList?.[0] || response.messages?.[0] || {};
+  const parts = [
+    group.groupId && `그룹 ${group.groupId}`,
+    firstMessage.messageId && `메시지 ${firstMessage.messageId}`,
+    firstMessage.statusCode && `상태 ${firstMessage.statusCode}`,
+    firstMessage.errorCode && `오류코드 ${firstMessage.errorCode}`,
+    firstMessage.errorMessage && `오류 ${firstMessage.errorMessage}`,
+    response.errorMessage && `오류 ${response.errorMessage}`,
+    response.message && `메시지 ${response.message}`,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function renderMessages() {
   const messages = getFilteredMessages();
   messageList.innerHTML = messages.length
     ? messages
         .map((message) => {
+          const solapiSummary = summarizeSolapiResponse(message.solapiResponse);
           return `
             <article class="message-card">
               <div class="message-top">
@@ -650,7 +667,9 @@ function renderMessages() {
                 <span class="status ${escapeHTML(message.status)}">${statusLabel(message.status)}</span>
               </div>
               <p>${escapeHTML(message.body)}</p>
+              <p class="meta-line">템플릿 ${escapeHTML(message.templateId || "미지정")}</p>
               ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
+              ${solapiSummary ? `<p class="meta-line">솔라피 응답: ${escapeHTML(solapiSummary)}</p>` : ""}
               <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
             </article>
           `;
