@@ -314,27 +314,6 @@ async function updateSellerApplication(env, request, id) {
       )
       .run();
 
-    await queueAlimtalk(env, {
-      type: "seller-approved",
-      targetRole: "seller",
-      targetName: updated.manager,
-      targetPhone: updated.phone,
-      title: "판매자 등록 승인 안내",
-      body: `${sellerName(updated)} 등록이 승인되었습니다. 신청하신 아이디(${updated.sellerId})로 판매자 페이지에 로그인할 수 있습니다.`,
-      relatedId: updated.id,
-    });
-  }
-
-  if (status === "rejected") {
-    await queueAlimtalk(env, {
-      type: "seller-rejected",
-      targetRole: "seller",
-      targetName: updated.manager,
-      targetPhone: updated.phone,
-      title: "판매자 등록 반려 안내",
-      body: `${sellerName(updated)} 등록 신청이 반려되었습니다. 사유: ${reviewMemo || "등록 정보 확인이 필요합니다."}`,
-      relatedId: updated.id,
-    });
   }
 
   return json({ ok: true, row: updated });

@@ -239,7 +239,16 @@ function showToast(message) {
   }, 2800);
 }
 
-function queueAlimtalk(message) {
+async function queueAlimtalk(message) {
+  const serverResult = await apiJson("/api/alimtalk", {
+    method: "POST",
+    body: JSON.stringify(message),
+  });
+  if (serverResult?.ok && Array.isArray(serverResult.rows)) {
+    setMessages(serverResult.rows);
+    return true;
+  }
+
   const messages = getMessages();
   messages.unshift({
     ...message,
@@ -250,6 +259,7 @@ function queueAlimtalk(message) {
     canceledAt: "",
   });
   setMessages(messages);
+  return false;
 }
 
 function getFilteredApplications() {
@@ -290,7 +300,7 @@ function renderStatsCards() {
   statGrid.innerHTML = [
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정" },
-    { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건` },
+    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건` },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관" },
   ]
     .map((stat) => {
@@ -317,7 +327,7 @@ function renderStats() {
   statGrid.innerHTML = [
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
-    { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
     .map((stat) => {
@@ -416,7 +426,9 @@ function renderApplicationDetail(application) {
       <div class="detail-actions">
         <button class="primary-btn" type="button" data-approve-application="${application.id}" ${isPending ? "" : "disabled"}>승인</button>
         <button class="danger-btn" type="button" data-reject-application="${application.id}" ${isPending ? "" : "disabled"}>반려</button>
-        <button class="ghost-btn" type="button" data-queue-application-talk="${application.id}">알림톡 작성</button>
+        <button class="ghost-btn" type="button" data-queue-application-talk="${application.id}" ${
+          application.status === "rejected" ? "" : "disabled"
+        }>반려 알림톡 작성</button>
       </div>
     </div>
   `;
@@ -450,17 +462,7 @@ function approveApplication(applicationId) {
   });
   setApplications(applications);
 
-  queueAlimtalk({
-    type: "seller-approved",
-    targetRole: "seller",
-    targetName: application.manager,
-    targetPhone: application.phone,
-    title: "판매자 등록 승인 안내",
-    body: `${sellerName(application)} 등록이 승인되었습니다. 신청하신 아이디(${application.sellerId})로 판매자 페이지에 로그인할 수 있습니다.`,
-    relatedId: application.id,
-  });
-
-  showToast("판매자 신청을 승인했고 알림톡 발송 대기에 추가했습니다.");
+  showToast("판매자 신청을 승인했습니다.");
   renderAll();
   syncApplicationStatusToServer(application.id, "approved", memo);
 }
@@ -478,7 +480,21 @@ function rejectApplication(applicationId) {
   });
   setApplications(applications);
 
-  queueAlimtalk({
+  showToast("판매자 신청을 반려했습니다. 필요 시 반려 알림톡을 수동 작성하세요.");
+  renderAll();
+  syncApplicationStatusToServer(application.id, "rejected", memo);
+}
+
+async function queueManualApplicationTalk(applicationId) {
+  const application = getApplications().find((row) => row.id === applicationId);
+  if (!application) return;
+  const memo = document.querySelector("#reviewMemo")?.value.trim() || application.reviewMemo || "등록 정보 확인이 필요합니다.";
+  if (application.status !== "rejected") {
+    showToast("반려 처리된 신청만 수동 알림톡을 작성할 수 있습니다.");
+    return;
+  }
+
+  const saved = await queueAlimtalk({
     type: "seller-rejected",
     targetRole: "seller",
     targetName: application.manager,
@@ -488,27 +504,7 @@ function rejectApplication(applicationId) {
     relatedId: application.id,
   });
 
-  showToast("판매자 신청을 반려했고 알림톡 발송 대기에 추가했습니다.");
-  renderAll();
-  syncApplicationStatusToServer(application.id, "rejected", memo);
-}
-
-function queueManualApplicationTalk(applicationId) {
-  const application = getApplications().find((row) => row.id === applicationId);
-  if (!application) return;
-  const memo = document.querySelector("#reviewMemo")?.value.trim() || "관리자 확인 후 안내드립니다.";
-
-  queueAlimtalk({
-    type: "seller-review-note",
-    targetRole: "seller",
-    targetName: application.manager,
-    targetPhone: application.phone,
-    title: "판매자 등록 검토 안내",
-    body: `${sellerName(application)} 등록 신청 검토 메모: ${memo}`,
-    relatedId: application.id,
-  });
-
-  showToast("검토 안내 알림톡을 발송 대기에 추가했습니다.");
+  showToast(saved ? "반려 알림톡을 서버 발송 대기에 추가했습니다." : "반려 알림톡을 임시 저장했습니다.");
   renderAll();
 }
 
@@ -620,7 +616,7 @@ function renderDashboardStats() {
     { label: "고객 견적", value: `${customerQuotes.length}건`, note: "서버 저장된 견적", action: "customer-quotes" },
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
-    { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
     .map((stat) => {
@@ -644,8 +640,6 @@ function renderMessages() {
   messageList.innerHTML = messages.length
     ? messages
         .map((message) => {
-          const isReady = message.status === "ready";
-          const isSent = message.status === "sent";
           return `
             <article class="message-card">
               <div class="message-top">
@@ -658,11 +652,6 @@ function renderMessages() {
               <p>${escapeHTML(message.body)}</p>
               ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
               <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
-              <div class="message-actions">
-                <button class="primary-btn" type="button" data-send-message="${message.id}" ${isReady ? "" : "disabled"}>발송</button>
-                <button class="plain-btn" type="button" data-cancel-message="${message.id}" ${isReady ? "" : "disabled"}>취소</button>
-                <button class="ghost-btn" type="button" data-resend-message="${message.id}" ${isSent ? "" : "disabled"}>재발송 대기</button>
-              </div>
             </article>
           `;
         })
@@ -670,7 +659,7 @@ function renderMessages() {
     : `
       <div class="empty-state">
         <strong>표시할 알림톡이 없습니다.</strong>
-        <p>승인, 반려, 검토 안내를 실행하면 발송 대기 큐에 추가됩니다.</p>
+        <p>견적 등록, 제안 도착, 판매자 등록 요청 등 자동 발송 기록이 여기에 표시됩니다.</p>
       </div>
     `;
 }
@@ -681,42 +670,6 @@ function updateMessage(messageId, updater) {
   if (!message) return;
   updater(message, messages);
   setMessages(messages);
-  renderAll();
-}
-
-function sendMessage(messageId) {
-  const sentAt = new Date().toISOString();
-  updateMessage(messageId, (message) => {
-    message.status = "sent";
-    message.sentAt = sentAt;
-  });
-  syncMessageStatusToServer(messageId, { status: "sent", sentAt });
-  showToast("알림톡을 발송 완료 처리했습니다.");
-}
-
-function cancelMessage(messageId) {
-  const canceledAt = new Date().toISOString();
-  updateMessage(messageId, (message) => {
-    message.status = "canceled";
-    message.canceledAt = canceledAt;
-  });
-  syncMessageStatusToServer(messageId, { status: "canceled", canceledAt });
-  showToast("알림톡 발송을 취소했습니다.");
-}
-
-function resendMessage(messageId) {
-  const message = getMessages().find((row) => row.id === messageId);
-  if (!message) return;
-  queueAlimtalk({
-    ...message,
-    id: undefined,
-    status: "ready",
-    createdAt: undefined,
-    sentAt: "",
-    canceledAt: "",
-    title: `${message.title} 재발송`,
-  });
-  showToast("재발송 알림톡을 발송 대기에 추가했습니다.");
   renderAll();
 }
 
@@ -856,24 +809,6 @@ document.addEventListener("click", (event) => {
   const queueTalkButton = event.target.closest("[data-queue-application-talk]");
   if (queueTalkButton) {
     queueManualApplicationTalk(queueTalkButton.dataset.queueApplicationTalk);
-    return;
-  }
-
-  const sendButton = event.target.closest("[data-send-message]");
-  if (sendButton) {
-    sendMessage(sendButton.dataset.sendMessage);
-    return;
-  }
-
-  const cancelButton = event.target.closest("[data-cancel-message]");
-  if (cancelButton) {
-    cancelMessage(cancelButton.dataset.cancelMessage);
-    return;
-  }
-
-  const resendButton = event.target.closest("[data-resend-message]");
-  if (resendButton) {
-    resendMessage(resendButton.dataset.resendMessage);
     return;
   }
 
