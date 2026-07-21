@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS alimtalk_queue (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   related_id TEXT DEFAULT '',
+  template_id TEXT DEFAULT '',
+  variables_json TEXT DEFAULT '{}',
+  solapi_group_id TEXT DEFAULT '',
+  solapi_message_id TEXT DEFAULT '',
+  error_message TEXT DEFAULT '',
   created_at TEXT NOT NULL,
   sent_at TEXT DEFAULT '',
   canceled_at TEXT DEFAULT ''

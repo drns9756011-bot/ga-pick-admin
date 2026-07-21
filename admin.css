@@ -415,6 +415,10 @@ button.application-card.is-active {
   line-height: 1.62;
 }
 
+.message-card .error-line {
+  color: var(--danger);
+}
+
 .panel-note {
   margin: 0;
   color: var(--muted);
@@ -506,7 +510,8 @@ button.application-card.is-active {
 }
 
 .status.rejected,
-.status.canceled {
+.status.canceled,
+.status.failed {
   background: #fdecea;
   color: var(--danger);
 }

@@ -217,6 +217,7 @@ function statusLabel(status) {
     rejected: "반려",
     ready: "발송 대기",
     sent: "발송완료",
+    failed: "발송실패",
     canceled: "취소",
   }[status] || status;
 }
@@ -655,6 +656,7 @@ function renderMessages() {
                 <span class="status ${escapeHTML(message.status)}">${statusLabel(message.status)}</span>
               </div>
               <p>${escapeHTML(message.body)}</p>
+              ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
               <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
               <div class="message-actions">
                 <button class="primary-btn" type="button" data-send-message="${message.id}" ${isReady ? "" : "disabled"}>발송</button>
