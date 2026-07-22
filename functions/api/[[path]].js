@@ -747,12 +747,29 @@ async function updateApprovedSeller(env, request, id) {
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
-  const nextPassword = String(body.password || "").trim();
-  if (nextPassword.length < 4) {
-    return json({ ok: false, message: "새 비밀번호는 4자 이상으로 입력해주세요." }, 400);
+  const updates = [];
+  const values = [];
+
+  if (Object.prototype.hasOwnProperty.call(body, "password")) {
+    const nextPassword = String(body.password || "").trim();
+    if (nextPassword.length < 4) {
+      return json({ ok: false, message: "새 비밀번호는 4자 이상으로 입력해주세요." }, 400);
+    }
+    updates.push("password = ?");
+    values.push(nextPassword);
   }
 
-  await env.DB.prepare("UPDATE approved_sellers SET password = ? WHERE id = ?").bind(nextPassword, id).run();
+  if (Object.prototype.hasOwnProperty.call(body, "managerPosition")) {
+    updates.push("manager_position = ?");
+    values.push(String(body.managerPosition || "").trim());
+  }
+
+  if (!updates.length) {
+    return json({ ok: false, message: "변경할 정보가 없습니다." }, 400);
+  }
+
+  values.push(id);
+  await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
   const row = normalizeApprovedSeller(
     await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first()
   );

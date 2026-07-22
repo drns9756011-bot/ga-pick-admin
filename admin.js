@@ -213,6 +213,25 @@ async function syncApprovedSellerPasswordToServer(sellerId, password) {
   return true;
 }
 
+async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ managerPosition }),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "직책 변경에 실패했습니다.");
+    return false;
+  }
+
+  const sellers = getApprovedSellers().map((seller) =>
+    seller.id === sellerId ? { ...seller, managerPosition: result.row?.managerPosition || managerPosition } : seller
+  );
+  setApprovedSellers(sellers);
+  renderAll();
+  return true;
+}
+
 async function syncApprovedSellerDeleteToServer(sellerId) {
   const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
@@ -607,11 +626,20 @@ function renderApprovedSellers() {
           return `
             <tr>
               <td>${escapeHTML(sellerName(seller))}<small>${escapeHTML(formatPhoneNumber(seller.phone))}</small></td>
-              <td>${escapeHTML(managerName(seller))}</td>
+              <td>
+                ${escapeHTML(seller.manager || "-")}
+                <small>
+                  <label class="inline-edit-label">
+                    직책
+                    <input type="text" value="${escapeHTML(seller.managerPosition || "")}" placeholder="예: 선임, 프로" data-approved-position-input="${escapeHTML(seller.id)}" />
+                  </label>
+                </small>
+              </td>
               <td>${escapeHTML(seller.branchRegion || "지역 미등록")}</td>
               <td>${escapeHTML(seller.sellerId)}</td>
               <td>
                 <div class="table-actions">
+                  <button class="plain-btn small-btn" type="button" data-save-approved-position="${escapeHTML(seller.id)}">직책 저장</button>
                   <button class="plain-btn small-btn" type="button" data-reset-approved-password="${escapeHTML(seller.id)}">비밀번호 초기화</button>
                   <button class="danger-btn small-btn" type="button" data-delete-approved-seller="${escapeHTML(seller.id)}">삭제</button>
                 </div>
@@ -847,6 +875,22 @@ async function resetApprovedSellerPassword(sellerId) {
   showToast(ok ? "비밀번호가 초기화되었습니다." : "비밀번호 초기화에 실패했습니다.");
 }
 
+async function saveApprovedSellerPosition(sellerId) {
+  const input = document.querySelector(`[data-approved-position-input="${CSS.escape(sellerId)}"]`);
+  const seller = getApprovedSellers().find((row) => row.id === sellerId);
+  if (!input || !seller) return;
+
+  const managerPosition = input.value.trim();
+  const rows = getApprovedSellers();
+  const target = rows.find((row) => row.id === sellerId);
+  if (target) target.managerPosition = managerPosition;
+  setApprovedSellers(rows);
+  renderAll();
+
+  const ok = await syncApprovedSellerPositionToServer(sellerId, managerPosition);
+  showToast(ok ? "판매자 직책을 변경했습니다." : "판매자 직책 변경에 실패했습니다.");
+}
+
 async function deleteApprovedSeller(sellerId) {
   const seller = getApprovedSellers().find((row) => row.id === sellerId);
   if (!seller) return;
@@ -1010,6 +1054,12 @@ document.addEventListener("click", (event) => {
   const resetApprovedPasswordButton = event.target.closest("[data-reset-approved-password]");
   if (resetApprovedPasswordButton) {
     resetApprovedSellerPassword(resetApprovedPasswordButton.dataset.resetApprovedPassword);
+    return;
+  }
+
+  const saveApprovedPositionButton = event.target.closest("[data-save-approved-position]");
+  if (saveApprovedPositionButton) {
+    saveApprovedSellerPosition(saveApprovedPositionButton.dataset.saveApprovedPosition);
     return;
   }
 
