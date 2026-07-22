@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   customerQuotes: "pickquoteCustomerQuotes",
   deletedQuoteLogs: "pickquoteDeletedQuoteLogs",
 };
+const PUBLIC_API_BASE = "https://ga-pick.com";
 
 let applicationFilter = "pending";
 let messageFilter = "ready";
@@ -119,7 +120,7 @@ async function syncMessageStatusToServer(messageId, payload) {
 }
 
 async function resendMessage(messageId) {
-  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
     method: "POST",
   });
   if (result?.row) {

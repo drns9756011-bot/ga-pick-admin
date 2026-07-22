@@ -456,13 +456,7 @@ async function queueSellerApplicationAdminAlert(env, row) {
 
 async function getSellerApplications(env) {
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
-  const rows = result.results.map(normalizeSellerApplication);
-  for (const row of rows) {
-    if (row?.status === "pending") {
-      await queueSellerApplicationAdminAlert(env, row);
-    }
-  }
-  return json({ ok: true, rows });
+  return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
 }
 
 async function createSellerApplication(env, request) {
