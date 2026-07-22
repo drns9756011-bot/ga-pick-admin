@@ -10,6 +10,7 @@ const PUBLIC_API_BASE = "https://ga-pick.com";
 let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
+let messageSyncError = "";
 const initialApplicationId = new URLSearchParams(window.location.search).get("application") || "";
 
 const statGrid = document.querySelector("#statGrid");
@@ -56,14 +57,17 @@ async function apiJson(path, options = {}) {
   if (!canUseApiServer()) return null;
 
   try {
+    const method = String(options.method || "GET").toUpperCase();
+    const headers = {
+      ...(method === "GET" ? {} : { "Content-Type": "application/json" }),
+      ...(options.headers || {}),
+    };
     const response = await fetch(path, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
+      cache: "no-store",
+      headers,
       ...options,
     });
-    if (!response.ok) throw new Error("api request failed");
+    if (!response.ok) throw new Error(`api request failed: ${response.status}`);
     return response.status === 204 ? null : response.json();
   } catch (error) {
     console.warn("API 요청에 실패했습니다.", error);
@@ -71,11 +75,29 @@ async function apiJson(path, options = {}) {
   }
 }
 
+async function loadAlimtalkMessagesFromServer() {
+  const timestamp = Date.now();
+  const publicMessages = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk?ts=${timestamp}`);
+  if (publicMessages?.ok && Array.isArray(publicMessages.rows)) {
+    messageSyncError = "";
+    return publicMessages;
+  }
+
+  const localMessages = await apiJson(`/api/alimtalk?ts=${timestamp}`);
+  if (localMessages?.ok && Array.isArray(localMessages.rows)) {
+    messageSyncError = "";
+    return localMessages;
+  }
+
+  messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
+  return null;
+}
+
 async function loadAdminDataFromServer() {
   const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs] = await Promise.all([
     apiJson("/api/seller-applications"),
     apiJson("/api/approved-sellers"),
-    apiJson(`${PUBLIC_API_BASE}/api/alimtalk`),
+    loadAlimtalkMessagesFromServer(),
     apiJson("/api/customer-quotes"),
     apiJson("/api/deleted-quote-logs"),
   ]);
@@ -750,6 +772,16 @@ function summarizeSolapiResponse(response) {
 
 function renderMessages() {
   const messages = getFilteredMessages();
+  if (messageSyncError) {
+    messageList.innerHTML = `
+      <div class="empty-state error-state">
+        <strong>알림톡 기록을 불러오지 못했습니다.</strong>
+        <p>${escapeHTML(messageSyncError)}</p>
+      </div>
+    `;
+    return;
+  }
+
   messageList.innerHTML = messages.length
     ? messages
         .map((message) => {
