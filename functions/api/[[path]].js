@@ -777,6 +777,77 @@ async function updateAlimtalk(env, request, id) {
   return json({ ok: true, row });
 }
 
+async function resendAlimtalk(env, id) {
+  await ensureAlimtalkColumns(env);
+  const row = normalizeMessage(
+    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
+  );
+  if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
+
+  const templateId = row.templateId || getSolapiTemplateId(env, row.type || "notice");
+  const result = await sendSolapiAlimtalk(env, row, templateId).catch((error) => ({
+    ok: false,
+    error: error?.message || "솔라피 재발송 처리 중 오류가 발생했습니다.",
+  }));
+  const sentAt = result.ok ? new Date().toISOString() : "";
+
+  await env.DB.prepare(
+    `UPDATE alimtalk_queue
+     SET status = ?, sent_at = ?, canceled_at = ?, template_id = ?,
+         solapi_group_id = ?, solapi_message_id = ?, error_message = ?, solapi_response_json = ?
+     WHERE id = ?`
+  )
+    .bind(
+      result.ok ? "sent" : result.skipped ? "ready" : "failed",
+      sentAt,
+      "",
+      templateId,
+      result.groupId || "",
+      result.messageId || "",
+      result.error || "",
+      JSON.stringify(result.payload || {}),
+      id
+    )
+    .run();
+
+  const updated = normalizeMessage(
+    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
+  );
+  return json({ ok: Boolean(result.ok), row: updated, message: result.ok ? "알림톡을 재발송했습니다." : result.error || "알림톡 재발송에 실패했습니다." });
+}
+
+function getSolapiHealth(env) {
+  const templates = {
+    customerQuoteReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED"),
+    customerQuoteClosed: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
+    customerBidReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
+    adminSellerApplication: solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
+    sellerBidSelected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
+    sellerApproved: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
+  };
+  return json({
+    ok: true,
+    hasApiKey: Boolean(String(env.SOLAPI_API_KEY || "").trim()),
+    hasApiSecret: Boolean(String(env.SOLAPI_API_SECRET || "").trim()),
+    hasChannelId: Boolean(solapiValue(env, "SOLAPI_CHANNEL_ID")),
+    hasFrom: Boolean(solapiValue(env, "SOLAPI_FROM")),
+    hasAdminPhone: Boolean(solapiValue(env, "SOLAPI_ADMIN_PHONE")),
+    templates,
+    missing: [
+      !String(env.SOLAPI_API_KEY || "").trim() && "SOLAPI_API_KEY",
+      !String(env.SOLAPI_API_SECRET || "").trim() && "SOLAPI_API_SECRET",
+      !solapiValue(env, "SOLAPI_CHANNEL_ID") && "SOLAPI_CHANNEL_ID",
+      !solapiValue(env, "SOLAPI_FROM") && "SOLAPI_FROM",
+      !templates.customerQuoteReceived && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED",
+      !templates.customerQuoteClosed && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED",
+      !templates.customerBidReceived && "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED",
+      !templates.adminSellerApplication && "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION",
+      !templates.sellerBidSelected && "SOLAPI_TEMPLATE_SELLER_BID_SELECTED",
+      !templates.sellerApproved && "SOLAPI_TEMPLATE_SELLER_APPROVED",
+    ].filter(Boolean),
+  });
+}
+
 async function getFile(env, key) {
   if (!env.FILES) return json({ ok: false, message: "R2 바인딩이 필요합니다." }, 500);
   const object = await env.FILES.get(key);
@@ -829,9 +900,13 @@ export async function onRequest(context) {
 
   if (path === "alimtalk" && method === "GET") return getAlimtalk(env);
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);
+  if (path.startsWith("alimtalk/") && path.endsWith("/resend") && method === "POST") {
+    return resendAlimtalk(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
   if (path.startsWith("alimtalk/") && method === "PATCH") {
     return updateAlimtalk(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
+  if (path === "solapi-health" && method === "GET") return getSolapiHealth(env);
 
   if (path === "uploads" && method === "POST") return uploadFile(env, request);
   if (path.startsWith("files/") && method === "GET") return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));

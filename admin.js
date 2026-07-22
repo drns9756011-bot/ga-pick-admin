@@ -118,6 +118,19 @@ async function syncMessageStatusToServer(messageId, payload) {
   });
 }
 
+async function resendMessage(messageId) {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
+    method: "POST",
+  });
+  if (result?.row) {
+    updateMessage(messageId, (message) => Object.assign(message, result.row));
+  } else {
+    await loadAdminDataFromServer();
+    renderAll();
+  }
+  showToast(result?.message || (result?.ok ? "알림톡을 재발송했습니다." : "알림톡 재발송에 실패했습니다."));
+}
+
 function readStorageArray(key) {
   try {
     const value = localStorage.getItem(key);
@@ -733,6 +746,9 @@ function renderMessages() {
               ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
               ${solapiSummary ? `<p class="meta-line">솔라피 응답: ${escapeHTML(solapiSummary)}</p>` : ""}
               <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
+              <div class="message-actions">
+                <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}">재발송 요청</button>
+              </div>
             </article>
           `;
         })
@@ -903,6 +919,12 @@ document.addEventListener("click", (event) => {
   if (messageFilterButton) {
     messageFilter = messageFilterButton.dataset.messageFilter;
     renderAll();
+    return;
+  }
+
+  const resendMessageButton = event.target.closest("[data-resend-message]");
+  if (resendMessageButton) {
+    resendMessage(resendMessageButton.dataset.resendMessage);
     return;
   }
 
