@@ -8,7 +8,7 @@ const STORAGE_KEYS = {
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
 let applicationFilter = "pending";
-let messageFilter = "ready";
+let messageFilter = "all";
 let selectedApplicationId = "";
 const initialApplicationId = new URLSearchParams(window.location.search).get("application") || "";
 
@@ -75,7 +75,7 @@ async function loadAdminDataFromServer() {
   const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs] = await Promise.all([
     apiJson("/api/seller-applications"),
     apiJson("/api/approved-sellers"),
-    apiJson("/api/alimtalk"),
+    apiJson(`${PUBLIC_API_BASE}/api/alimtalk`),
     apiJson("/api/customer-quotes"),
     apiJson("/api/deleted-quote-logs"),
   ]);
@@ -130,6 +130,19 @@ async function resendMessage(messageId) {
     renderAll();
   }
   showToast(result?.message || (result?.ok ? "알림톡을 재발송했습니다." : "알림톡 재발송에 실패했습니다."));
+}
+
+async function refreshMessageStatus(messageId) {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
+    method: "POST",
+  });
+  if (result?.row) {
+    updateMessage(messageId, (message) => Object.assign(message, result.row));
+  } else {
+    await loadAdminDataFromServer();
+    renderAll();
+  }
+  showToast(result?.ok ? "솔라피 최종 상태를 확인했습니다." : result?.message || "솔라피 상태 확인에 실패했습니다.");
 }
 
 function readStorageArray(key) {
@@ -261,6 +274,8 @@ function statusLabel(status) {
     approved: "승인",
     rejected: "반려",
     ready: "발송 대기",
+    accepted: "접수됨",
+    sending: "전송중",
     sent: "발송완료",
     failed: "발송실패",
     canceled: "취소",
@@ -285,7 +300,7 @@ function showToast(message) {
 }
 
 async function queueAlimtalk(message) {
-  const serverResult = await apiJson("/api/alimtalk", {
+  const serverResult = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk`, {
     method: "POST",
     body: JSON.stringify(message),
   });
@@ -339,13 +354,14 @@ function renderStatsCards() {
   const messages = getMessages();
   const pendingCount = applications.filter((row) => row.status === "pending").length;
   const readyMessages = messages.filter((row) => row.status === "ready").length;
+  const acceptedMessages = messages.filter((row) => row.status === "accepted" || row.status === "sending").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
 
   statGrid.innerHTML = [
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정" },
-    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건` },
+    { label: "알림톡 상태", value: `${acceptedMessages + readyMessages}건`, note: `접수 ${acceptedMessages}건 · 완료 ${sentMessages}건` },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관" },
   ]
     .map((stat) => {
@@ -366,13 +382,14 @@ function renderStats() {
   const messages = getMessages();
   const pendingCount = applications.filter((row) => row.status === "pending").length;
   const readyMessages = messages.filter((row) => row.status === "ready").length;
+  const acceptedMessages = messages.filter((row) => row.status === "accepted" || row.status === "sending").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
 
   statGrid.innerHTML = [
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
-    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "알림톡 상태", value: `${acceptedMessages + readyMessages}건`, note: `접수 ${acceptedMessages}건 · 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
     .map((stat) => {
@@ -596,6 +613,9 @@ function quoteAlimtalkStatus(quote) {
   const related = getMessagesForQuote(quote.id);
   if (!related.length) return { label: "알림톡 없음", className: "canceled" };
   if (related.some((message) => message.status === "sent")) return { label: "발송완료", className: "sent" };
+  if (related.some((message) => message.status === "accepted" || message.status === "sending")) {
+    return { label: "접수됨", className: "accepted" };
+  }
   if (related.some((message) => message.status === "ready")) return { label: "발송대기", className: "ready" };
   if (related.some((message) => message.status === "canceled")) return { label: "취소", className: "canceled" };
   return { label: "확인필요", className: "pending" };
@@ -685,6 +705,7 @@ function renderDashboardStats() {
   const customerQuotes = getCustomerQuotes();
   const pendingCount = applications.filter((row) => row.status === "pending").length;
   const readyMessages = messages.filter((row) => row.status === "ready").length;
+  const acceptedMessages = messages.filter((row) => row.status === "accepted" || row.status === "sending").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
 
@@ -692,7 +713,7 @@ function renderDashboardStats() {
     { label: "고객 견적", value: `${customerQuotes.length}건`, note: "서버 저장된 견적", action: "customer-quotes" },
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 계정", action: "approved-sellers" },
-    { label: "알림톡 상태", value: `${readyMessages}건`, note: `자동 발송 완료 ${sentMessages}건`, action: "ready-messages" },
+    { label: "알림톡 상태", value: `${acceptedMessages + readyMessages}건`, note: `접수 ${acceptedMessages}건 · 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
     .map((stat) => {
@@ -749,6 +770,7 @@ function renderMessages() {
               <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
               <div class="message-actions">
                 <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}">재발송 요청</button>
+                <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}">상태 확인</button>
               </div>
             </article>
           `;
@@ -865,7 +887,7 @@ function openStatAction(action) {
   }
 
   if (action === "ready-messages") {
-    messageFilter = "ready";
+    messageFilter = "all";
     renderAll();
     scrollToAdminSection("#messages");
     return;
@@ -926,6 +948,12 @@ document.addEventListener("click", (event) => {
   const resendMessageButton = event.target.closest("[data-resend-message]");
   if (resendMessageButton) {
     resendMessage(resendMessageButton.dataset.resendMessage);
+    return;
+  }
+
+  const refreshMessageButton = event.target.closest("[data-refresh-message]");
+  if (refreshMessageButton) {
+    refreshMessageStatus(refreshMessageButton.dataset.refreshMessage);
     return;
   }
 

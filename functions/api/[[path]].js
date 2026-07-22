@@ -342,8 +342,29 @@ async function sendSolapiAlimtalk(env, message, templateId) {
   }
 
   const firstMessage = payload.messageList?.[0] || payload.messages?.[0] || {};
-  const failedCount = Number(payload.groupInfo?.failedCount || payload.failedCount || 0);
-  const firstError = firstMessage.errorMessage || firstMessage.errorCode || firstMessage.reason || "";
+  const failedMessage = payload.failedMessageList?.[0] || {};
+  const failedCount = Number(
+    payload.groupInfo?.failedCount ||
+      payload.failedCount ||
+      payload.groupInfo?.count?.registeredFailed ||
+      payload.groupInfo?.count?.sentFailed ||
+      payload.failedMessageList?.length ||
+      0
+  );
+  const firstStatusCode = String(firstMessage.statusCode || failedMessage.statusCode || "");
+  const nonSuccessStatusMessage =
+    firstMessage.statusMessage && firstStatusCode && !firstStatusCode.startsWith("2")
+      ? firstMessage.statusMessage
+      : "";
+  const firstError =
+    failedMessage.statusMessage ||
+    failedMessage.errorMessage ||
+    failedMessage.errorCode ||
+    nonSuccessStatusMessage ||
+    firstMessage.errorMessage ||
+    firstMessage.errorCode ||
+    firstMessage.reason ||
+    "";
   if (failedCount > 0 || firstError) {
     return {
       ok: false,
@@ -351,12 +372,16 @@ async function sendSolapiAlimtalk(env, message, templateId) {
       error: firstError || "솔라피에서 발송 실패 응답을 반환했습니다.",
       payload,
       groupId: payload.groupInfo?.groupId || payload.groupId || "",
-      messageId: firstMessage.messageId || firstMessage.message_id || "",
+      messageId: firstMessage.messageId || failedMessage.messageId || firstMessage.message_id || "",
     };
   }
 
+  const acceptedStatusCodes = ["2000", "3000"];
+  const queueStatus = firstStatusCode === "4000" ? "sent" : acceptedStatusCodes.includes(firstStatusCode) ? "accepted" : "accepted";
+
   return {
     ok: true,
+    queueStatus,
     payload,
     groupId: payload.groupInfo?.groupId || payload.groupId || "",
     messageId: firstMessage.messageId || firstMessage.message_id || "",
@@ -415,7 +440,7 @@ async function queueAlimtalk(env, message) {
      WHERE id = ?`
   )
     .bind(
-      result.ok ? "sent" : result.skipped ? "ready" : "failed",
+      result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed",
       sentAt,
       result.groupId || "",
       result.messageId || "",
@@ -792,7 +817,7 @@ async function resendAlimtalk(env, id) {
      WHERE id = ?`
   )
     .bind(
-      result.ok ? "sent" : result.skipped ? "ready" : "failed",
+      result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed",
       sentAt,
       "",
       templateId,

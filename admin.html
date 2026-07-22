@@ -98,9 +98,10 @@
               <h2>알림톡 발송 상태</h2>
             </div>
             <div class="segmented" aria-label="알림톡 상태 필터">
-              <button class="is-active" type="button" data-message-filter="ready">대기</button>
+              <button type="button" data-message-filter="ready">대기</button>
+              <button type="button" data-message-filter="accepted">접수됨</button>
               <button type="button" data-message-filter="sent">발송완료</button>
-              <button type="button" data-message-filter="all">전체</button>
+              <button class="is-active" type="button" data-message-filter="all">전체</button>
             </div>
           </div>
           <div class="message-list" id="messageList"></div>

@@ -546,7 +546,9 @@ button.application-card.is-active {
 }
 
 .status.pending,
-.status.ready {
+.status.ready,
+.status.accepted,
+.status.sending {
   background: #fff4dc;
   color: var(--warning);
 }
