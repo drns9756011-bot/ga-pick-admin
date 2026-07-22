@@ -18,7 +18,7 @@ const SOLAPI_DEFAULTS = {
 };
 
 function solapiValue(env, key) {
-  return env?.[key] || SOLAPI_DEFAULTS[key] || "";
+  return String(env?.[key] || SOLAPI_DEFAULTS[key] || "").trim();
 }
 
 function json(payload, status = 200) {
@@ -230,13 +230,20 @@ async function ensureAlimtalkColumns(env) {
 async function hmacSha256Hex(secret, value) {
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    new TextEncoder().encode(String(secret || "").trim()),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
   return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function createSolapiSalt() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -288,9 +295,11 @@ async function sendSolapiAlimtalk(env, message, templateId) {
   }
 
   const date = new Date().toISOString();
-  const salt = crypto.randomUUID();
-  const signature = await hmacSha256Hex(env.SOLAPI_API_SECRET, date + salt);
-  const authorization = `HMAC-SHA256 apiKey=${env.SOLAPI_API_KEY}, date=${date}, salt=${salt}, signature=${signature}`;
+  const salt = createSolapiSalt();
+  const apiKey = String(env.SOLAPI_API_KEY || "").trim();
+  const apiSecret = String(env.SOLAPI_API_SECRET || "").trim();
+  const signature = await hmacSha256Hex(apiSecret, date + salt);
+  const authorization = `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`;
   const variables = {};
   Object.entries(message.variables || {}).forEach(([key, value]) => {
     variables[key] = String(value ?? "");
