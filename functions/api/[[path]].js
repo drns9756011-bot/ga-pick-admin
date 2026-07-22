@@ -5,6 +5,22 @@ const jsonHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+const SOLAPI_DEFAULTS = {
+  SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
+  SOLAPI_FROM: "01066312323",
+  SOLAPI_ADMIN_PHONE: "01066312323",
+  SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED: "KA01TP260721025042754h4ZUWHp0Vl8",
+  SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED: "KA01TP2607210258227887LLx9OshNug",
+  SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED: "KA01TP260721025517053z5NPvs1ZUIX",
+  SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION: "KA01TP2607210300081256MK0cxuHata",
+  SOLAPI_TEMPLATE_SELLER_BID_SELECTED: "KA01TP260721133628815TgDs1sAwUhc",
+  SOLAPI_TEMPLATE_SELLER_APPROVED: "KA01TP2607211355258674q0EFuag5GE",
+};
+
+function solapiValue(env, key) {
+  return env?.[key] || SOLAPI_DEFAULTS[key] || "";
+}
+
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -228,12 +244,12 @@ async function hmacSha256Hex(secret, value) {
 function getSolapiTemplateId(env, type) {
   return (
     {
-      "customer-quote-received": env.SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED,
-      "customer-bid-received": env.SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED,
-      "customer-quote-closed": env.SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED,
-      "seller-bid-selected": env.SOLAPI_TEMPLATE_SELLER_BID_SELECTED,
-      "seller-approved": env.SOLAPI_TEMPLATE_SELLER_APPROVED,
-      "seller-application-received": env.SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION,
+      "customer-quote-received": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED"),
+      "customer-bid-received": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
+      "customer-quote-closed": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
+      "seller-bid-selected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
+      "seller-approved": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
+      "seller-application-received": solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
     }[type] || ""
   );
 }
@@ -242,8 +258,8 @@ function canSendSolapi(env, message, templateId) {
   return Boolean(
     env.SOLAPI_API_KEY &&
       env.SOLAPI_API_SECRET &&
-      env.SOLAPI_CHANNEL_ID &&
-      env.SOLAPI_FROM &&
+      solapiValue(env, "SOLAPI_CHANNEL_ID") &&
+      solapiValue(env, "SOLAPI_FROM") &&
       templateId &&
       normalizePhone(message.targetPhone)
   );
@@ -253,8 +269,8 @@ function getSolapiMissingKeys(env, message, templateId) {
   return [
     ["SOLAPI_API_KEY", env.SOLAPI_API_KEY],
     ["SOLAPI_API_SECRET", env.SOLAPI_API_SECRET],
-    ["SOLAPI_CHANNEL_ID", env.SOLAPI_CHANNEL_ID],
-    ["SOLAPI_FROM", env.SOLAPI_FROM],
+    ["SOLAPI_CHANNEL_ID", solapiValue(env, "SOLAPI_CHANNEL_ID")],
+    ["SOLAPI_FROM", solapiValue(env, "SOLAPI_FROM")],
     ["templateId", templateId],
     ["targetPhone", normalizePhone(message.targetPhone)],
   ]
@@ -291,9 +307,9 @@ async function sendSolapiAlimtalk(env, message, templateId) {
         {
           type: "ATA",
           to: normalizePhone(message.targetPhone),
-          from: normalizePhone(env.SOLAPI_FROM),
+          from: normalizePhone(solapiValue(env, "SOLAPI_FROM")),
           kakaoOptions: {
-            pfId: env.SOLAPI_CHANNEL_ID,
+            pfId: solapiValue(env, "SOLAPI_CHANNEL_ID"),
             templateId,
             variables,
             disableSms: false,
