@@ -428,9 +428,41 @@ async function queueAlimtalk(env, message) {
   return { id, ...result };
 }
 
+async function queueSellerApplicationAdminAlert(env, row) {
+  await ensureAlimtalkColumns(env);
+  const existing = await env.DB.prepare(
+    "SELECT id FROM alimtalk_queue WHERE type = ? AND target_role = ? AND related_id = ? LIMIT 1"
+  )
+    .bind("seller-application-received", "admin", row.id)
+    .first();
+  if (existing) return { skipped: true, id: existing.id };
+
+  return queueAlimtalk(env, {
+    type: "seller-application-received",
+    targetRole: "admin",
+    targetName: "관리자",
+    targetPhone: solapiValue(env, "SOLAPI_ADMIN_PHONE") || solapiValue(env, "SOLAPI_FROM"),
+    title: "판매자 등록 요청이 접수되었습니다",
+    body: `${sellerName(row)} ${row.manager} 매니저의 판매자 등록 요청이 접수되었습니다.`,
+    relatedId: row.id,
+    variables: {
+      "#{채널}": row.channel,
+      "#{지점명}": row.branch,
+      "#{매니저명}": row.manager,
+      "#{연락처}": formatPhoneNumber(row.phone),
+    },
+  });
+}
+
 async function getSellerApplications(env) {
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
-  return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
+  const rows = result.results.map(normalizeSellerApplication);
+  for (const row of rows) {
+    if (row?.status === "pending") {
+      await queueSellerApplicationAdminAlert(env, row);
+    }
+  }
+  return json({ ok: true, rows });
 }
 
 async function createSellerApplication(env, request) {
@@ -446,7 +478,7 @@ async function createSellerApplication(env, request) {
   const cardImageKey = savedCard.key || body.cardImageKey || "";
 
   const duplicate = await env.DB.prepare(
-    "SELECT id FROM seller_applications WHERE seller_id = ? OR phone = ? LIMIT 1"
+    "SELECT id FROM seller_applications WHERE (seller_id = ? OR phone = ?) AND status IN ('pending', 'approved') LIMIT 1"
   )
     .bind(body.sellerId, body.phone)
     .first();
@@ -486,15 +518,7 @@ async function createSellerApplication(env, request) {
     await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first()
   );
 
-  await queueAlimtalk(env, {
-    type: "seller-application-received",
-    targetRole: "seller",
-    targetName: row.manager,
-    targetPhone: row.phone,
-    title: "판매자 등록 신청 접수 안내",
-    body: `${sellerName(row)} 등록 신청이 접수되었습니다. 관리자 검토 후 승인 또는 반려 안내를 발송합니다.`,
-    relatedId: row.id,
-  });
+  await queueSellerApplicationAdminAlert(env, row);
 
   return json({ ok: true, row }, 201);
 }
