@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   approvedSellers: "pickquoteApprovedSellers",
   alimtalkQueue: "pickquoteAlimtalkQueue",
   customerQuotes: "pickquoteCustomerQuotes",
+  deletedQuoteLogs: "pickquoteDeletedQuoteLogs",
 };
 
 let applicationFilter = "pending";
@@ -37,9 +38,14 @@ customerQuoteSection.innerHTML = `
     <p class="panel-note">고객님 견적 저장 여부와 알림톡 발송 상태를 확인합니다.</p>
   </div>
   <div class="quote-admin-list" id="customerQuoteList"></div>
+  <div class="deleted-quote-log">
+    <h3>삭제된 견적 기록</h3>
+    <div class="deleted-quote-list" id="deletedQuoteList"></div>
+  </div>
 `;
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
+const deletedQuoteList = document.querySelector("#deletedQuoteList");
 
 function canUseApiServer() {
   return window.location.protocol !== "file:";
@@ -65,11 +71,12 @@ async function apiJson(path, options = {}) {
 }
 
 async function loadAdminDataFromServer() {
-  const [applications, approvedSellers, messages, customerQuotes] = await Promise.all([
+  const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs] = await Promise.all([
     apiJson("/api/seller-applications"),
     apiJson("/api/approved-sellers"),
     apiJson("/api/alimtalk"),
     apiJson("/api/customer-quotes"),
+    apiJson("/api/deleted-quote-logs"),
   ]);
 
   if (applications?.ok && Array.isArray(applications.rows)) {
@@ -86,6 +93,10 @@ async function loadAdminDataFromServer() {
 
   if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
     writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
+  }
+
+  if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) {
+    writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
   }
 }
 
@@ -168,6 +179,22 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
   return true;
 }
 
+async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
+  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ reason }),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "고객 견적 삭제에 실패했습니다.");
+    return false;
+  }
+
+  await loadAdminDataFromServer();
+  renderAll();
+  return true;
+}
+
 function getMessages() {
   return readStorageArray(STORAGE_KEYS.alimtalkQueue);
 }
@@ -178,6 +205,10 @@ function setMessages(rows) {
 
 function getCustomerQuotes() {
   return readStorageArray(STORAGE_KEYS.customerQuotes);
+}
+
+function getDeletedQuoteLogs() {
+  return readStorageArray(STORAGE_KEYS.deletedQuoteLogs);
 }
 
 function escapeHTML(value) {
@@ -589,6 +620,11 @@ function renderCustomerQuotes() {
                   <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
                   <span>대표 이미지/고객 정보 1년 보관</span>
                 </div>
+                <div class="quote-admin-actions">
+                  <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">
+                    견적 삭제
+                  </button>
+                </div>
               </div>
             </article>
           `;
@@ -598,6 +634,32 @@ function renderCustomerQuotes() {
       <div class="empty-state">
         <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
         <p>노출용에서 고객님 견적을 등록하면 여기에 저장 현황과 알림톡 상태가 표시됩니다.</p>
+      </div>
+    `;
+
+  renderDeletedQuoteLogs();
+}
+
+function renderDeletedQuoteLogs() {
+  if (!deletedQuoteList) return;
+
+  const logs = getDeletedQuoteLogs();
+  deletedQuoteList.innerHTML = logs.length
+    ? logs
+        .map((log) => {
+          return `
+            <article class="deleted-quote-row">
+              <strong>${escapeHTML(log.customer || "고객명 없음")} · ${escapeHTML(formatPhoneNumber(log.phone))}</strong>
+              <span>${escapeHTML(log.reason || "삭제 사유 없음")}</span>
+              <small>${escapeHTML(log.quoteNumber || log.quoteId || "-")} · ${escapeHTML(formatDate(log.deletedAt))}</small>
+            </article>
+          `;
+        })
+        .join("")
+    : `
+      <div class="empty-state compact-empty">
+        <strong>삭제된 견적 기록이 없습니다.</strong>
+        <p>관리자가 견적을 삭제하면 고객명, 연락처, 삭제 사유만 남습니다.</p>
       </div>
     `;
 }
@@ -728,6 +790,37 @@ async function deleteApprovedSeller(sellerId) {
   showToast(ok ? "승인 판매자를 삭제했습니다." : "승인 판매자 삭제에 실패했습니다.");
 }
 
+async function deleteCustomerQuote(quoteId) {
+  const quote = getCustomerQuotes().find((row) => row.id === quoteId);
+  if (!quote) return;
+
+  const reason = window.prompt(
+    `${quote.customer || "고객"}님의 견적을 삭제합니다.\n삭제 후 견적, 이미지, 제안, 후기는 서버에서 완전히 삭제됩니다.\n삭제 사유를 입력해주세요.`,
+    ""
+  );
+  if (reason === null) return;
+
+  const trimmedReason = String(reason).trim();
+  if (trimmedReason.length < 2) {
+    showToast("삭제 사유를 입력해야 견적을 삭제할 수 있습니다.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `정말 이 견적을 삭제할까요?\n고객명: ${quote.customer || "-"}\n연락처: ${formatPhoneNumber(quote.phone)}\n사유: ${trimmedReason}`
+  );
+  if (!confirmed) return;
+
+  writeStorageArray(
+    STORAGE_KEYS.customerQuotes,
+    getCustomerQuotes().filter((row) => row.id !== quoteId)
+  );
+  renderAll();
+
+  const ok = await syncCustomerQuoteDeleteToServer(quoteId, trimmedReason);
+  showToast(ok ? "고객 견적을 삭제하고 사유를 기록했습니다." : "고객 견적 삭제에 실패했습니다.");
+}
+
 
 function scrollToAdminSection(selector) {
   document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -840,6 +933,12 @@ document.addEventListener("click", (event) => {
   const deleteApprovedSellerButton = event.target.closest("[data-delete-approved-seller]");
   if (deleteApprovedSellerButton) {
     deleteApprovedSeller(deleteApprovedSellerButton.dataset.deleteApprovedSeller);
+    return;
+  }
+
+  const deleteCustomerQuoteButton = event.target.closest("[data-delete-customer-quote]");
+  if (deleteCustomerQuoteButton) {
+    deleteCustomerQuote(deleteCustomerQuoteButton.dataset.deleteCustomerQuote);
   }
 });
 

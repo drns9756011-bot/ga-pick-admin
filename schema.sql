@@ -139,3 +139,15 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reviews_seller_id ON reviews(seller_id);
+
+CREATE TABLE IF NOT EXISTS deleted_quote_logs (
+  id TEXT PRIMARY KEY,
+  quote_id TEXT DEFAULT '',
+  quote_number TEXT DEFAULT '',
+  customer TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  deleted_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at);

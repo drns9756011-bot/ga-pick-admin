@@ -484,6 +484,54 @@ button.application-card.is-active {
   font-weight: 900;
 }
 
+.quote-admin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.deleted-quote-log {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.deleted-quote-log h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.deleted-quote-list {
+  display: grid;
+  gap: 8px;
+}
+
+.deleted-quote-row {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #f0d2d2;
+  border-radius: 10px;
+  background: #fff8f8;
+}
+
+.deleted-quote-row strong {
+  color: #171f2a;
+  font-size: 14px;
+}
+
+.deleted-quote-row span {
+  color: #b4322a;
+  font-weight: 850;
+}
+
+.deleted-quote-row small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .status {
   flex: 0 0 auto;
   display: inline-flex;
