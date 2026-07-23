@@ -12,7 +12,6 @@ const SOLAPI_DEFAULTS = {
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED: "KA01TP260721025042754h4ZUWHp0Vl8",
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED: "KA01TP2607210258227887LLx9OshNug",
   SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED: "KA01TP260721025517053z5NPvs1ZUIX",
-  SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION: "KA01TP2607210300081256MK0cxuHata",
   SOLAPI_TEMPLATE_SELLER_BID_SELECTED: "KA01TP260721133628815TgDs1sAwUhc",
   SOLAPI_TEMPLATE_SELLER_APPROVED: "KA01TP2607211355258674q0EFuag5GE",
 };
@@ -256,7 +255,6 @@ function getSolapiTemplateId(env, type) {
       "customer-quote-closed": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
       "seller-bid-selected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
       "seller-approved": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
-      "seller-application-received": solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
     }[type] || ""
   );
 }
@@ -453,93 +451,9 @@ async function queueAlimtalk(env, message) {
   return { id, ...result };
 }
 
-async function queueSellerApplicationAdminAlert(env, row) {
-  await ensureAlimtalkColumns(env);
-  const existing = await env.DB.prepare(
-    "SELECT id FROM alimtalk_queue WHERE type = ? AND target_role = ? AND related_id = ? LIMIT 1"
-  )
-    .bind("seller-application-received", "admin", row.id)
-    .first();
-  if (existing) return { skipped: true, id: existing.id };
-
-  return queueAlimtalk(env, {
-    type: "seller-application-received",
-    targetRole: "admin",
-    targetName: "관리자",
-    targetPhone: solapiValue(env, "SOLAPI_ADMIN_PHONE") || solapiValue(env, "SOLAPI_FROM"),
-    title: "판매자 등록 요청이 접수되었습니다",
-    body: `${sellerName(row)} ${row.manager} 매니저의 판매자 등록 요청이 접수되었습니다.`,
-    relatedId: row.id,
-    variables: {
-      "#{채널}": row.channel,
-      "#{지점명}": row.branch,
-      "#{매니저명}": row.manager,
-      "#{연락처}": formatPhoneNumber(row.phone),
-    },
-  });
-}
-
 async function getSellerApplications(env) {
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
-}
-
-async function createSellerApplication(env, request) {
-  const body = await request.json();
-  if (!body.sellerId || !body.branch || !body.manager || !body.phone) {
-    return json({ ok: false, message: "판매자 아이디, 지점명, 매니저 이름, 연락처가 필요합니다." }, 400);
-  }
-
-  const id = body.id || createId("seller");
-  const now = body.requestedAt || new Date().toISOString();
-  const savedCard = await saveDataUrlToR2(env, body.cardImage, "seller-cards", id);
-  const cardImage = savedCard.url || body.cardImage || "";
-  const cardImageKey = savedCard.key || body.cardImageKey || "";
-
-  const duplicate = await env.DB.prepare(
-    "SELECT id FROM seller_applications WHERE (seller_id = ? OR phone = ?) AND status IN ('pending', 'approved') LIMIT 1"
-  )
-    .bind(body.sellerId, body.phone)
-    .first();
-
-  if (duplicate && duplicate.id !== id) {
-    return json({ ok: false, message: "이미 접수된 판매자 신청입니다." }, 409);
-  }
-
-  await env.DB.prepare(
-    `INSERT OR REPLACE INTO seller_applications
-      (id, status, requested_at, reviewed_at, review_memo, seller_id, password, channel, branch, branch_region,
-       manager, manager_position, phone, card_image, card_image_key, memo, consent_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      body.status || "pending",
-      now,
-      body.reviewedAt || "",
-      body.reviewMemo || "",
-      body.sellerId,
-      body.password || "",
-      body.channel || "",
-      body.branch || "",
-      body.branchRegion || "",
-      body.manager || "",
-      body.managerPosition || "",
-      body.phone || "",
-      cardImage,
-      cardImageKey,
-      body.memo || "",
-      JSON.stringify(body.consent || {})
-    )
-    .run();
-
-  const row = normalizeSellerApplication(
-    await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first()
-  );
-
-  await queueSellerApplicationAdminAlert(env, row);
-
-  return json({ ok: true, row }, 201);
 }
 
 async function updateSellerApplication(env, request, id) {
@@ -857,7 +771,6 @@ function getSolapiHealth(env) {
     customerQuoteReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED"),
     customerQuoteClosed: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
     customerBidReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
-    adminSellerApplication: solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
     sellerBidSelected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
     sellerApproved: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
   };
@@ -877,7 +790,6 @@ function getSolapiHealth(env) {
       !templates.customerQuoteReceived && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED",
       !templates.customerQuoteClosed && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED",
       !templates.customerBidReceived && "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED",
-      !templates.adminSellerApplication && "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION",
       !templates.sellerBidSelected && "SOLAPI_TEMPLATE_SELLER_BID_SELECTED",
       !templates.sellerApproved && "SOLAPI_TEMPLATE_SELLER_APPROVED",
     ].filter(Boolean),
@@ -916,7 +828,6 @@ export async function onRequest(context) {
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
 
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
-  if (path === "seller-applications" && method === "POST") return createSellerApplication(env, request);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
@@ -946,10 +857,6 @@ export async function onRequest(context) {
 
   if (path === "uploads" && method === "POST") return uploadFile(env, request);
   if (path.startsWith("files/") && method === "GET") return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
-
-  if (path === "send-mail" && method === "POST") {
-    return json({ ok: false, message: "정식 서비스 메일 발송은 별도 메일 API 연동이 필요합니다." }, 501);
-  }
 
   return json({ ok: false, message: "API를 찾을 수 없습니다." }, 404);
 }
