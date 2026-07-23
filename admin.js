@@ -541,7 +541,7 @@ function renderApplicationDetail(application) {
         <button class="danger-btn" type="button" data-reject-application="${application.id}" ${isPending ? "" : "disabled"}>반려</button>
         <button class="ghost-btn" type="button" data-queue-application-talk="${application.id}" ${
           application.status === "rejected" ? "" : "disabled"
-        }>반려 알림톡 작성</button>
+        }>반려 알림톡 재발송</button>
       </div>
     </div>
   `;
@@ -593,7 +593,7 @@ function rejectApplication(applicationId) {
   });
   setApplications(applications);
 
-  showToast("판매자 신청을 반려했습니다. 필요 시 반려 알림톡을 수동 작성하세요.");
+  showToast("판매자 신청을 반려했습니다. 입력한 반려 사유로 알림톡을 발송합니다.");
   renderAll();
   syncApplicationStatusToServer(application.id, "rejected", memo);
 }
@@ -615,6 +615,13 @@ async function queueManualApplicationTalk(applicationId) {
     title: "판매자 등록 반려 안내",
     body: `${sellerName(application)} 등록 신청이 반려되었습니다. 사유: ${memo}`,
     relatedId: application.id,
+    variables: {
+      "#{판매자명}": sellerName(application),
+      "#{채널}": application.channel || "",
+      "#{지점명}": application.branch || "",
+      "#{매니저명}": application.manager || "",
+      "#{반려사유}": memo,
+    },
   });
 
   showToast(saved ? "반려 알림톡을 서버 발송 대기에 추가했습니다." : "반려 알림톡을 임시 저장했습니다.");

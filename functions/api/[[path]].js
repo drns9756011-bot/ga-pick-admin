@@ -14,6 +14,7 @@ const SOLAPI_DEFAULTS = {
   SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED: "KA01TP260721025517053z5NPvs1ZUIX",
   SOLAPI_TEMPLATE_SELLER_BID_SELECTED: "KA01TP260721133628815TgDs1sAwUhc",
   SOLAPI_TEMPLATE_SELLER_APPROVED: "KA01TP2607211355258674q0EFuag5GE",
+  SOLAPI_TEMPLATE_SELLER_REJECTED: "KA01TP260723100412983h6pYV7vWwi5",
 };
 
 function solapiValue(env, key) {
@@ -346,6 +347,7 @@ function getSolapiTemplateId(env, type) {
       "customer-quote-closed": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
       "seller-bid-selected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
       "seller-approved": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
+      "seller-rejected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_REJECTED"),
     }[type] || ""
   );
 }
@@ -591,6 +593,26 @@ async function updateSellerApplication(env, request, id) {
 
   }
 
+  if (status === "rejected") {
+    const rejectReason = reviewMemo || "등록 정보 확인이 필요합니다.";
+    await queueAlimtalk(env, {
+      type: "seller-rejected",
+      targetRole: "seller",
+      targetName: updated.manager,
+      targetPhone: updated.phone,
+      title: "판매자 등록 반려 안내",
+      body: `${sellerName(updated)} 등록 신청이 반려되었습니다. 사유: ${rejectReason}`,
+      relatedId: updated.id,
+      variables: {
+        "#{판매자명}": sellerName(updated),
+        "#{채널}": updated.channel,
+        "#{지점명}": updated.branch,
+        "#{매니저명}": updated.manager,
+        "#{반려사유}": rejectReason,
+      },
+    });
+  }
+
   return json({ ok: true, row: updated });
 }
 
@@ -818,6 +840,7 @@ function getSolapiHealth(env) {
     customerBidReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
     sellerBidSelected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
     sellerApproved: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
+    sellerRejected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_REJECTED"),
   };
   return json({
     ok: true,
@@ -837,6 +860,7 @@ function getSolapiHealth(env) {
       !templates.customerBidReceived && "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED",
       !templates.sellerBidSelected && "SOLAPI_TEMPLATE_SELLER_BID_SELECTED",
       !templates.sellerApproved && "SOLAPI_TEMPLATE_SELLER_APPROVED",
+      !templates.sellerRejected && "SOLAPI_TEMPLATE_SELLER_REJECTED",
     ].filter(Boolean),
   });
 }
