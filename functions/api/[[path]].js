@@ -1,4 +1,4 @@
-const jsonHeaders = {
+﻿const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -208,6 +208,33 @@ async function saveDataUrlToR2(env, dataUrl, prefix, id) {
 }
 
 async function ensureAlimtalkColumns(env) {
+  try {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS alimtalk_queue (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'ready',
+        type TEXT NOT NULL,
+        target_role TEXT DEFAULT '',
+        target_name TEXT DEFAULT '',
+        target_phone TEXT DEFAULT '',
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        related_id TEXT DEFAULT '',
+        template_id TEXT DEFAULT '',
+        variables_json TEXT DEFAULT '{}',
+        solapi_group_id TEXT DEFAULT '',
+        solapi_message_id TEXT DEFAULT '',
+        error_message TEXT DEFAULT '',
+        solapi_response_json TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        sent_at TEXT DEFAULT '',
+        canceled_at TEXT DEFAULT ''
+      )`
+    ).run();
+  } catch (error) {
+    // Existing production databases may already have this table with a legacy shape.
+  }
+
   const statements = [
     "ALTER TABLE alimtalk_queue ADD COLUMN template_id TEXT DEFAULT ''",
     "ALTER TABLE alimtalk_queue ADD COLUMN variables_json TEXT DEFAULT '{}'",
@@ -223,6 +250,100 @@ async function ensureAlimtalkColumns(env) {
     } catch (error) {
       // Already migrated.
     }
+  }
+}
+
+async function insertAlimtalkRow(env, row) {
+  try {
+    return await env.DB.prepare(
+      `INSERT INTO alimtalk_queue
+        (id, status, type, target_role, target_name, target_phone, title, body, related_id,
+         template_id, variables_json, solapi_group_id, solapi_message_id, error_message, solapi_response_json,
+         created_at, sent_at, canceled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        row.id,
+        row.status,
+        row.type,
+        row.targetRole,
+        row.targetName,
+        row.targetPhone,
+        row.title,
+        row.body,
+        row.relatedId,
+        row.templateId,
+        row.variablesJson,
+        "",
+        "",
+        "",
+        "",
+        row.createdAt,
+        "",
+        ""
+      )
+      .run();
+  } catch (firstError) {
+    await ensureAlimtalkColumns(env);
+    return env.DB.prepare(
+      `INSERT INTO alimtalk_queue
+        (id, status, type, target_role, target_name, target_phone, title, body, related_id,
+         template_id, variables_json, solapi_group_id, solapi_message_id, error_message,
+         created_at, sent_at, canceled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        row.id,
+        row.status,
+        row.type,
+        row.targetRole,
+        row.targetName,
+        row.targetPhone,
+        row.title,
+        row.body,
+        row.relatedId,
+        row.templateId,
+        row.variablesJson,
+        "",
+        "",
+        "",
+        row.createdAt,
+        "",
+        ""
+      )
+      .run();
+  }
+}
+
+async function updateAlimtalkDeliveryResult(env, id, result, options = {}) {
+  const sentAt = result.ok ? new Date().toISOString() : "";
+  const status = result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed";
+  try {
+    await env.DB.prepare(
+      `UPDATE alimtalk_queue
+       SET status = ?, sent_at = ?, canceled_at = COALESCE(?, canceled_at), template_id = COALESCE(?, template_id),
+           solapi_group_id = ?, solapi_message_id = ?, error_message = ?, solapi_response_json = ?
+       WHERE id = ?`
+    )
+      .bind(
+        status,
+        sentAt,
+        options.canceledAt ?? null,
+        options.templateId ?? null,
+        result.groupId || "",
+        result.messageId || "",
+        result.error || "",
+        JSON.stringify(result.payload || {}),
+        id
+      )
+      .run();
+  } catch (firstError) {
+    await ensureAlimtalkColumns(env);
+    await env.DB.prepare(
+      "UPDATE alimtalk_queue SET status = ?, sent_at = ?, solapi_group_id = ?, solapi_message_id = ?, error_message = ? WHERE id = ?"
+    )
+      .bind(status, sentAt, result.groupId || "", result.messageId || "", result.error || "", id)
+      .run();
   }
 }
 
@@ -392,34 +513,20 @@ async function queueAlimtalk(env, message) {
   const id = createId("talk");
   const templateId = message.templateId || getSolapiTemplateId(env, message.type || "notice");
   const variablesJson = JSON.stringify(message.variables || {});
-  await env.DB.prepare(
-    `INSERT INTO alimtalk_queue
-      (id, status, type, target_role, target_name, target_phone, title, body, related_id,
-       template_id, variables_json, solapi_group_id, solapi_message_id, error_message, solapi_response_json,
-       created_at, sent_at, canceled_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      message.status || "ready",
-      message.type || "notice",
-      message.targetRole || "",
-      message.targetName || "",
-      message.targetPhone || "",
-      message.title || "알림",
-      message.body || "",
-      message.relatedId || "",
-      templateId,
-      variablesJson,
-      "",
-      "",
-      "",
-      "",
-      now,
-      "",
-      ""
-    )
-    .run();
+  await insertAlimtalkRow(env, {
+    id,
+    status: message.status || "ready",
+    type: message.type || "notice",
+    targetRole: message.targetRole || "",
+    targetName: message.targetName || "",
+    targetPhone: message.targetPhone || "",
+    title: message.title || "알림",
+    body: message.body || "",
+    relatedId: message.relatedId || "",
+    templateId,
+    variablesJson,
+    createdAt: now,
+  });
 
   let result;
   try {
@@ -427,26 +534,11 @@ async function queueAlimtalk(env, message) {
   } catch (error) {
     result = {
       ok: false,
-      error: error?.message || "솔라피 발송 처리 중 오류가 발생했습니다.",
+      error: error?.message || "알림톡 발송 처리 중 오류가 발생했습니다.",
     };
   }
 
-  const sentAt = result.ok ? new Date().toISOString() : "";
-  await env.DB.prepare(
-    `UPDATE alimtalk_queue
-     SET status = ?, sent_at = ?, solapi_group_id = ?, solapi_message_id = ?, error_message = ?, solapi_response_json = ?
-     WHERE id = ?`
-  )
-    .bind(
-      result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed",
-      sentAt,
-      result.groupId || "",
-      result.messageId || "",
-      result.error || "",
-      JSON.stringify(result.payload || {}),
-      id
-    )
-    .run();
+  await updateAlimtalkDeliveryResult(env, id, result);
 
   return { id, ...result };
 }
@@ -700,6 +792,7 @@ async function deleteApprovedSeller(env, id) {
 }
 
 async function getAlimtalk(env) {
+  await ensureAlimtalkColumns(env);
   const result = await env.DB.prepare("SELECT * FROM alimtalk_queue ORDER BY created_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeMessage) });
 }
@@ -711,6 +804,7 @@ async function createAlimtalk(env, request) {
 }
 
 async function updateAlimtalk(env, request, id) {
+  await ensureAlimtalkColumns(env);
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
@@ -739,26 +833,7 @@ async function resendAlimtalk(env, id) {
     ok: false,
     error: error?.message || "솔라피 재발송 처리 중 오류가 발생했습니다.",
   }));
-  const sentAt = result.ok ? new Date().toISOString() : "";
-
-  await env.DB.prepare(
-    `UPDATE alimtalk_queue
-     SET status = ?, sent_at = ?, canceled_at = ?, template_id = ?,
-         solapi_group_id = ?, solapi_message_id = ?, error_message = ?, solapi_response_json = ?
-     WHERE id = ?`
-  )
-    .bind(
-      result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed",
-      sentAt,
-      "",
-      templateId,
-      result.groupId || "",
-      result.messageId || "",
-      result.error || "",
-      JSON.stringify(result.payload || {}),
-      id
-    )
-    .run();
+  await updateAlimtalkDeliveryResult(env, id, result, { canceledAt: "", templateId });
 
   const updated = normalizeMessage(
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
