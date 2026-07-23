@@ -167,6 +167,16 @@ async function refreshMessageStatus(messageId) {
   showToast(result?.ok ? "솔라피 최종 상태를 확인했습니다." : result?.message || "솔라피 상태 확인에 실패했습니다.");
 }
 
+async function deleteMessage(messageId) {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}`, {
+    method: "DELETE",
+  });
+  if (!result?.ok) return;
+
+  setMessages(getMessages().filter((message) => message.id !== messageId));
+  renderAll();
+}
+
 function readStorageArray(key) {
   try {
     const value = localStorage.getItem(key);
@@ -831,6 +841,7 @@ function renderMessages() {
               <div class="message-actions">
                 <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}">재발송 요청</button>
                 <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}">상태 확인</button>
+                <button class="danger-btn small-btn" type="button" data-delete-message="${escapeHTML(message.id)}">삭제</button>
               </div>
             </article>
           `;
@@ -1030,6 +1041,12 @@ document.addEventListener("click", (event) => {
   const refreshMessageButton = event.target.closest("[data-refresh-message]");
   if (refreshMessageButton) {
     refreshMessageStatus(refreshMessageButton.dataset.refreshMessage);
+    return;
+  }
+
+  const deleteMessageButton = event.target.closest("[data-delete-message]");
+  if (deleteMessageButton) {
+    deleteMessage(deleteMessageButton.dataset.deleteMessage);
     return;
   }
 
