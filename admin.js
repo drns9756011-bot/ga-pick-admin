@@ -12,6 +12,17 @@ let messageFilter = "all";
 let selectedApplicationId = "";
 let messageSyncError = "";
 const initialApplicationId = new URLSearchParams(window.location.search).get("application") || "";
+const SELLER_CHANNELS = [
+  "LG전자 BEST SHOP",
+  "롯데하이마트",
+  "삼성스토어",
+  "이마트(LG)",
+  "이마트(삼성)",
+  "전자랜드(LG)",
+  "전자랜드(삼성)",
+];
+const QUOTE_PURPOSES = ["웨딩,혼수", "신축입주", "이사", "인테리어", "일반"];
+const QUOTE_BRANDS = ["LG전자", "삼성전자", "비교견적"];
 
 const statGrid = document.querySelector("#statGrid");
 const applicationList = document.querySelector("#applicationList");
@@ -48,6 +59,76 @@ customerQuoteSection.innerHTML = `
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
 const deletedQuoteList = document.querySelector("#deletedQuoteList");
+
+const editCustomerQuoteModal = document.createElement("div");
+editCustomerQuoteModal.className = "admin-modal";
+editCustomerQuoteModal.id = "editCustomerQuoteModal";
+editCustomerQuoteModal.hidden = true;
+editCustomerQuoteModal.innerHTML = `
+  <div class="admin-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="editCustomerQuoteTitle">
+    <div class="admin-modal-head">
+      <div>
+        <p class="eyebrow">Customer Quote</p>
+        <h2 id="editCustomerQuoteTitle">고객 견적 정보 수정</h2>
+      </div>
+      <button class="modal-close-btn" type="button" data-close-admin-modal aria-label="닫기">×</button>
+    </div>
+    <form class="admin-edit-form" id="editCustomerQuoteForm">
+      <input type="hidden" name="quoteId" />
+      <div class="form-grid">
+        <label>고객명<input type="text" name="customer" required /></label>
+        <label>연락처<input type="text" name="phone" data-phone-edit required /></label>
+        <label>구매사유<select name="purchasePurpose"></select></label>
+        <label>원하는 브랜드<select name="desiredBrand"></select></label>
+        <label class="span-2">품목<input type="text" name="items" required /></label>
+        <label>기존 견적금액(원)<input type="number" name="price" min="0" step="1" /></label>
+        <label>설치 지역<input type="text" name="region" /></label>
+        <label class="span-2">고객 작성 내용<textarea name="memo" rows="5"></textarea></label>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost-btn" type="button" data-close-admin-modal>취소</button>
+        <button class="primary-btn" type="submit">서버에 저장</button>
+      </div>
+    </form>
+  </div>
+`;
+document.body.appendChild(editCustomerQuoteModal);
+
+const editApprovedSellerModal = document.createElement("div");
+editApprovedSellerModal.className = "admin-modal";
+editApprovedSellerModal.id = "editApprovedSellerModal";
+editApprovedSellerModal.hidden = true;
+editApprovedSellerModal.innerHTML = `
+  <div class="admin-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="editApprovedSellerTitle">
+    <div class="admin-modal-head">
+      <div>
+        <p class="eyebrow">Approved Seller</p>
+        <h2 id="editApprovedSellerTitle">승인 판매자 정보 수정</h2>
+      </div>
+      <button class="modal-close-btn" type="button" data-close-admin-modal aria-label="닫기">×</button>
+    </div>
+    <form class="admin-edit-form" id="editApprovedSellerForm">
+      <input type="hidden" name="sellerId" />
+      <div class="form-grid">
+        <label>채널<select name="channel" required></select></label>
+        <label>지점명<input type="text" name="branch" required /></label>
+        <label>지점 지역<input type="text" name="branchRegion" /></label>
+        <label>매니저명<input type="text" name="manager" required /></label>
+        <label>직책<input type="text" name="managerPosition" placeholder="예: 선임, 프로" /></label>
+        <label>연락처<input type="text" name="phone" data-phone-edit required /></label>
+        <label class="span-2">관리 메모<textarea name="memo" rows="4"></textarea></label>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost-btn" type="button" data-close-admin-modal>취소</button>
+        <button class="primary-btn" type="submit">서버에 저장</button>
+      </div>
+    </form>
+  </div>
+`;
+document.body.appendChild(editApprovedSellerModal);
+
+const editCustomerQuoteForm = document.querySelector("#editCustomerQuoteForm");
+const editApprovedSellerForm = document.querySelector("#editApprovedSellerForm");
 
 function canUseApiServer() {
   return window.location.protocol !== "file:";
@@ -242,6 +323,23 @@ async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
   return true;
 }
 
+async function syncApprovedSellerUpdateToServer(sellerId, payload) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "판매자 정보 변경에 실패했습니다.");
+    return false;
+  }
+
+  const sellers = getApprovedSellers().map((seller) => (seller.id === sellerId ? { ...seller, ...result.row } : seller));
+  setApprovedSellers(sellers);
+  renderAll();
+  return true;
+}
+
 async function syncApprovedSellerDeleteToServer(sellerId) {
   const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
@@ -253,6 +351,23 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
   }
 
   await loadAdminDataFromServer();
+  renderAll();
+  return true;
+}
+
+async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
+  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "고객 견적 수정에 실패했습니다.");
+    return false;
+  }
+
+  const quotes = getCustomerQuotes().map((quote) => (quote.id === quoteId ? { ...quote, ...result.row } : quote));
+  writeStorageArray(STORAGE_KEYS.customerQuotes, quotes);
   renderAll();
   return true;
 }
@@ -307,6 +422,55 @@ function formatPhoneNumber(value) {
   if (digits.length <= 3) return digits;
   if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
+}
+
+function createOptions(options, selectedValue = "") {
+  return options
+    .map((option) => `<option value="${escapeHTML(option)}"${option === selectedValue ? " selected" : ""}>${escapeHTML(option)}</option>`)
+    .join("");
+}
+
+function fillSelect(select, options, selectedValue = "") {
+  if (!select) return;
+  select.innerHTML = createOptions(options, selectedValue);
+}
+
+function closeAdminModals() {
+  editCustomerQuoteModal.hidden = true;
+  editApprovedSellerModal.hidden = true;
+}
+
+function openEditCustomerQuoteModal(quoteId) {
+  const quote = getCustomerQuotes().find((row) => row.id === quoteId);
+  if (!quote || !editCustomerQuoteForm) return;
+
+  editCustomerQuoteForm.quoteId.value = quote.id;
+  editCustomerQuoteForm.customer.value = quote.customer || "";
+  editCustomerQuoteForm.phone.value = formatPhoneNumber(quote.phone);
+  editCustomerQuoteForm.items.value = quote.items || "";
+  editCustomerQuoteForm.price.value = Number(quote.price || 0) || "";
+  editCustomerQuoteForm.region.value = quote.region || "";
+  editCustomerQuoteForm.memo.value = quote.memo || "";
+  fillSelect(editCustomerQuoteForm.purchasePurpose, QUOTE_PURPOSES, quote.purchasePurpose || "");
+  fillSelect(editCustomerQuoteForm.desiredBrand, QUOTE_BRANDS, quote.desiredBrand || "");
+  editCustomerQuoteModal.hidden = false;
+  editCustomerQuoteForm.customer.focus();
+}
+
+function openEditApprovedSellerModal(sellerId) {
+  const seller = getApprovedSellers().find((row) => row.id === sellerId);
+  if (!seller || !editApprovedSellerForm) return;
+
+  editApprovedSellerForm.sellerId.value = seller.id;
+  fillSelect(editApprovedSellerForm.channel, SELLER_CHANNELS, seller.channel || "");
+  editApprovedSellerForm.branch.value = seller.branch || "";
+  editApprovedSellerForm.branchRegion.value = seller.branchRegion || "";
+  editApprovedSellerForm.manager.value = seller.manager || "";
+  editApprovedSellerForm.managerPosition.value = seller.managerPosition || "";
+  editApprovedSellerForm.phone.value = formatPhoneNumber(seller.phone);
+  editApprovedSellerForm.memo.value = seller.memo || "";
+  editApprovedSellerModal.hidden = false;
+  editApprovedSellerForm.branch.focus();
 }
 
 function formatDate(value) {
@@ -645,18 +809,13 @@ function renderApprovedSellers() {
               <td>${escapeHTML(sellerName(seller))}<small>${escapeHTML(formatPhoneNumber(seller.phone))}</small></td>
               <td>
                 ${escapeHTML(seller.manager || "-")}
-                <small>
-                  <label class="inline-edit-label">
-                    직책
-                    <input type="text" value="${escapeHTML(seller.managerPosition || "")}" placeholder="예: 선임, 프로" data-approved-position-input="${escapeHTML(seller.id)}" />
-                  </label>
-                </small>
+                <small>${escapeHTML(seller.managerPosition || "직책 미등록")}</small>
               </td>
               <td>${escapeHTML(seller.branchRegion || "지역 미등록")}</td>
               <td>${escapeHTML(seller.sellerId)}</td>
               <td>
                 <div class="table-actions">
-                  <button class="plain-btn small-btn" type="button" data-save-approved-position="${escapeHTML(seller.id)}">직책 저장</button>
+                  <button class="plain-btn small-btn" type="button" data-edit-approved-seller="${escapeHTML(seller.id)}">정보 수정</button>
                   <button class="plain-btn small-btn" type="button" data-reset-approved-password="${escapeHTML(seller.id)}">비밀번호 초기화</button>
                   <button class="danger-btn small-btn" type="button" data-delete-approved-seller="${escapeHTML(seller.id)}">삭제</button>
                 </div>
@@ -667,7 +826,7 @@ function renderApprovedSellers() {
         .join("")
     : `
       <tr>
-        <td colspan="4">아직 승인된 판매자가 없습니다.</td>
+        <td colspan="5">아직 승인된 판매자가 없습니다.</td>
       </tr>
     `;
 }
@@ -716,12 +875,18 @@ function renderCustomerQuotes() {
                 </div>
                 <div class="quote-admin-meta">
                   <span>견적번호 ${escapeHTML(quote.quoteNumber || "-")}</span>
+                  <span>브랜드 ${escapeHTML(quote.desiredBrand || "미입력")}</span>
+                  <span>지역 ${escapeHTML(quote.region || "미입력")}</span>
                   <span>저장 ${escapeHTML(formatDate(quote.createdAt))}</span>
                   <span>제안 가능 ${escapeHTML(formatDate(quote.quoteExpiresAt))}까지</span>
                   <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
                   <span>대표 이미지/고객 정보 1년 보관</span>
                 </div>
+                ${quote.memo ? `<p class="quote-admin-memo">${escapeHTML(quote.memo)}</p>` : ""}
                 <div class="quote-admin-actions">
+                  <button class="plain-btn small-btn" type="button" data-edit-customer-quote="${escapeHTML(quote.id)}">
+                    정보 수정
+                  </button>
                   <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">
                     견적 삭제
                   </button>
@@ -954,6 +1119,59 @@ async function deleteCustomerQuote(quoteId) {
   showToast(ok ? "고객 견적을 삭제하고 사유를 기록했습니다." : "고객 견적 삭제에 실패했습니다.");
 }
 
+async function submitCustomerQuoteEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const quoteId = form.quoteId.value;
+  const payload = {
+    customer: form.customer.value.trim(),
+    phone: form.phone.value,
+    items: form.items.value.trim(),
+    purchasePurpose: form.purchasePurpose.value,
+    desiredBrand: form.desiredBrand.value,
+    price: Number(form.price.value || 0),
+    region: form.region.value.trim(),
+    memo: form.memo.value.trim(),
+  };
+
+  if (!payload.customer || !normalizePhone(payload.phone) || !payload.items) {
+    showToast("고객명, 연락처, 품목은 필수입니다.");
+    return;
+  }
+
+  const ok = await syncCustomerQuoteUpdateToServer(quoteId, payload);
+  if (ok) {
+    closeAdminModals();
+    showToast("고객 견적 정보를 서버에 저장했습니다.");
+  }
+}
+
+async function submitApprovedSellerEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const sellerId = form.sellerId.value;
+  const payload = {
+    channel: form.channel.value,
+    branch: form.branch.value.trim(),
+    branchRegion: form.branchRegion.value.trim(),
+    manager: form.manager.value.trim(),
+    managerPosition: form.managerPosition.value.trim(),
+    phone: form.phone.value,
+    memo: form.memo.value.trim(),
+  };
+
+  if (!payload.channel || !payload.branch || !payload.manager || !normalizePhone(payload.phone)) {
+    showToast("채널, 지점명, 매니저명, 연락처는 필수입니다.");
+    return;
+  }
+
+  const ok = await syncApprovedSellerUpdateToServer(sellerId, payload);
+  if (ok) {
+    closeAdminModals();
+    showToast("승인 판매자 정보를 서버에 저장했습니다.");
+  }
+}
+
 
 function scrollToAdminSection(selector) {
   document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1087,6 +1305,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const editApprovedSellerButton = event.target.closest("[data-edit-approved-seller]");
+  if (editApprovedSellerButton) {
+    openEditApprovedSellerModal(editApprovedSellerButton.dataset.editApprovedSeller);
+    return;
+  }
+
   const deleteApprovedSellerButton = event.target.closest("[data-delete-approved-seller]");
   if (deleteApprovedSellerButton) {
     deleteApprovedSeller(deleteApprovedSellerButton.dataset.deleteApprovedSeller);
@@ -1096,10 +1320,35 @@ document.addEventListener("click", (event) => {
   const deleteCustomerQuoteButton = event.target.closest("[data-delete-customer-quote]");
   if (deleteCustomerQuoteButton) {
     deleteCustomerQuote(deleteCustomerQuoteButton.dataset.deleteCustomerQuote);
+    return;
+  }
+
+  const editCustomerQuoteButton = event.target.closest("[data-edit-customer-quote]");
+  if (editCustomerQuoteButton) {
+    openEditCustomerQuoteModal(editCustomerQuoteButton.dataset.editCustomerQuote);
+    return;
+  }
+
+  const closeModalButton = event.target.closest("[data-close-admin-modal]");
+  if (closeModalButton || event.target.classList.contains("admin-modal")) {
+    closeAdminModals();
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (!event.target.matches("[data-phone-edit]")) return;
+  event.target.value = formatPhoneNumber(event.target.value);
+});
+
+editCustomerQuoteForm?.addEventListener("submit", submitCustomerQuoteEdit);
+editApprovedSellerForm?.addEventListener("submit", submitApprovedSellerEdit);
+
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeAdminModals();
+    return;
+  }
+
   if (event.key !== "Enter" && event.key !== " ") return;
 
   const statAction = event.target.closest("[data-stat-action]");

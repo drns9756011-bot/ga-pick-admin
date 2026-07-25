@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS customer_quotes (
   phone TEXT NOT NULL,
   items TEXT NOT NULL,
   purchase_purpose TEXT DEFAULT '',
+  desired_brand TEXT DEFAULT '',
   price INTEGER DEFAULT 0,
   region TEXT DEFAULT '',
   memo TEXT DEFAULT '',

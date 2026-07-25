@@ -155,6 +155,7 @@ function normalizeCustomerQuote(row, images = []) {
     phone: row.phone,
     items: row.items,
     purchasePurpose: row.purchase_purpose || "",
+    desiredBrand: row.desired_brand || "",
     price: Number(row.price || 0),
     region: row.region || "",
     memo: row.memo || "",
@@ -645,6 +646,7 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN quote_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN full_images_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN personal_expires_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN desired_brand TEXT DEFAULT ''",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];
@@ -740,6 +742,49 @@ async function deleteCustomerQuote(env, request, id) {
   return json({ ok: true, id, deletedAt });
 }
 
+async function updateCustomerQuote(env, request, id) {
+  await ensureCustomerQuoteColumns(env);
+  const body = await request.json().catch(() => ({}));
+  const existing = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
+  if (!existing) return json({ ok: false, message: "수정할 고객 견적을 찾을 수 없습니다." }, 404);
+
+  const nextCustomer = String(body.customer || "").trim();
+  const nextPhone = normalizePhone(body.phone || "");
+  const nextItems = String(body.items || "").trim();
+  if (!nextCustomer || !nextPhone || !nextItems) {
+    return json({ ok: false, message: "고객명, 연락처, 품목은 필수입니다." }, 400);
+  }
+
+  await env.DB.prepare(
+    `UPDATE customer_quotes
+     SET customer = ?,
+         phone = ?,
+         items = ?,
+         purchase_purpose = ?,
+         desired_brand = ?,
+         price = ?,
+         region = ?,
+         memo = ?
+     WHERE id = ?`
+  )
+    .bind(
+      nextCustomer,
+      nextPhone,
+      nextItems,
+      String(body.purchasePurpose || "").trim(),
+      String(body.desiredBrand || "").trim(),
+      Number(body.price || 0),
+      String(body.region || "").trim(),
+      String(body.memo || "").trim(),
+      id
+    )
+    .run();
+
+  const row = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
+  const images = await getQuoteImages(env, id);
+  return json({ ok: true, row: normalizeCustomerQuote(row, images) });
+}
+
 async function updateApprovedSeller(env, request, id) {
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
@@ -760,6 +805,38 @@ async function updateApprovedSeller(env, request, id) {
   if (Object.prototype.hasOwnProperty.call(body, "managerPosition")) {
     updates.push("manager_position = ?");
     values.push(String(body.managerPosition || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "channel")) {
+    updates.push("channel = ?");
+    values.push(String(body.channel || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "branch")) {
+    updates.push("branch = ?");
+    values.push(String(body.branch || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "branchRegion")) {
+    updates.push("branch_region = ?");
+    values.push(String(body.branchRegion || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "manager")) {
+    updates.push("manager = ?");
+    values.push(String(body.manager || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "phone")) {
+    const nextPhone = normalizePhone(body.phone || "");
+    if (!nextPhone) return json({ ok: false, message: "판매자 연락처를 입력해주세요." }, 400);
+    updates.push("phone = ?");
+    values.push(nextPhone);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "memo")) {
+    updates.push("memo = ?");
+    values.push(String(body.memo || "").trim());
   }
 
   if (!updates.length) {
@@ -904,6 +981,9 @@ export async function onRequest(context) {
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
+  if (path.startsWith("customer-quotes/") && method === "PATCH") {
+    return updateCustomerQuote(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
   if (path.startsWith("customer-quotes/") && method === "DELETE") {
     return deleteCustomerQuote(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
