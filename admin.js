@@ -79,7 +79,7 @@ editCustomerQuoteModal.innerHTML = `
         <label>고객명<input type="text" name="customer" required /></label>
         <label>연락처<input type="text" name="phone" data-phone-edit required /></label>
         <label>구매사유<select name="purchasePurpose"></select></label>
-        <label>원하는 브랜드<select name="desiredBrand"></select></label>
+        <label>브랜드<select name="desiredBrand"></select></label>
         <label class="span-2">품목<input type="text" name="items" required /></label>
         <label>기존 견적금액(원)<input type="number" name="price" min="0" step="1" /></label>
         <label>설치 지역<input type="text" name="region" /></label>

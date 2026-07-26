@@ -40,6 +40,16 @@ function normalizePhone(value) {
   return String(value || "").replace(/[^0-9]/g, "");
 }
 
+function normalizeQuoteBrand(value) {
+  const raw = String(value || "").trim();
+  const compact = raw.replace(/\s+/g, "").toLowerCase();
+  if (!compact) return "";
+  if (compact.includes("비교")) return "비교견적";
+  if (compact.includes("lg") || compact.includes("엘지")) return "LG전자";
+  if (compact.includes("삼성") || compact.includes("samsung")) return "삼성전자";
+  return raw;
+}
+
 function formatPhoneNumber(value) {
   const digits = normalizePhone(value);
   if (!digits) return "";
@@ -155,7 +165,7 @@ function normalizeCustomerQuote(row, images = []) {
     phone: row.phone,
     items: row.items,
     purchasePurpose: row.purchase_purpose || "",
-    desiredBrand: row.desired_brand || "",
+    desiredBrand: normalizeQuoteBrand(row.desired_brand || row.desiredBrand || row.brand || ""),
     price: Number(row.price || 0),
     region: row.region || "",
     memo: row.memo || "",
@@ -772,7 +782,7 @@ async function updateCustomerQuote(env, request, id) {
       nextPhone,
       nextItems,
       String(body.purchasePurpose || "").trim(),
-      String(body.desiredBrand || "").trim(),
+      normalizeQuoteBrand(body.desiredBrand || body.desired_brand || body.brand || ""),
       Number(body.price || 0),
       String(body.region || "").trim(),
       String(body.memo || "").trim(),
