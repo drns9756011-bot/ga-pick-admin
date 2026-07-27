@@ -52,7 +52,7 @@ const ADMIN_PAGE_CONFIG = {
     title: "관리 현황",
     heading: "운영 현황을 카테고리별로 확인하세요.",
     copy: "카드를 누르면 고객 견적, 판매자 신청, 승인 판매자, 알림톡 상태 페이지로 이동합니다.",
-    visible: ["statGrid"],
+    visible: ["statGrid", "dashboardHome"],
   },
   customers: {
     path: "/customers",
@@ -86,6 +86,7 @@ const ADMIN_PAGE_CONFIG = {
 
 const ADMIN_SECTION_IDS = [
   "statGrid",
+  "dashboardHome",
   "customerQuotes",
   "sellerReview",
   "applications",
