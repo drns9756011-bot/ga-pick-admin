@@ -32,11 +32,121 @@ const approvedSellerRows = document.querySelector("#approvedSellerRows");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
+const adminShell = document.querySelector(".admin-shell");
+const adminHeaderTitle = document.querySelector(".admin-header h1");
+const adminHeaderCopy = document.querySelector(".header-copy");
+const adminLoadingModal = document.querySelector("#adminLoadingModal");
+const adminLoadingTitle = document.querySelector("#adminLoadingTitle");
+const adminLoadingText = document.querySelector("#adminLoadingText");
+let adminLoadingCount = 0;
 document.querySelector(".home-link")?.setAttribute("href", "https://ga-pick.com/");
 document.querySelector(".home-link")?.setAttribute("target", "_blank");
 document.querySelector(".home-link")?.setAttribute("rel", "noopener");
 if (document.querySelector(".home-link")) {
   document.querySelector(".home-link").textContent = "서비스 화면으로";
+}
+
+const ADMIN_PAGE_CONFIG = {
+  dashboard: {
+    path: "/",
+    title: "관리 현황",
+    heading: "운영 현황을 카테고리별로 확인하세요.",
+    copy: "카드를 누르면 고객 견적, 판매자 신청, 승인 판매자, 알림톡 상태 페이지로 이동합니다.",
+    visible: ["statGrid"],
+  },
+  customers: {
+    path: "/customers",
+    title: "고객 견적",
+    heading: "고객 견적을 확인하고 필요한 정보를 수정하세요.",
+    copy: "서버에 저장된 고객님 견적, 선택 상태, 삭제 이력을 관리합니다.",
+    visible: ["customerQuotes"],
+  },
+  sellers: {
+    path: "/sellers",
+    title: "판매자 신청",
+    heading: "판매자 등록 신청을 검토하세요.",
+    copy: "신청 상세 정보를 확인하고 승인 또는 반려 처리를 진행합니다.",
+    visible: ["sellerReview", "applications", "applicationDetail"],
+  },
+  approvedSellers: {
+    path: "/approved-sellers",
+    title: "승인 판매자",
+    heading: "승인된 판매자 계정을 관리하세요.",
+    copy: "채널, 지점, 매니저, 직책, 비밀번호 초기화와 계정 삭제를 관리합니다.",
+    visible: ["adminSecondaryGrid", "approvedSellers"],
+  },
+  alimtalk: {
+    path: "/alimtalk",
+    title: "알림톡 상태",
+    heading: "알림톡 발송 상태를 확인하세요.",
+    copy: "발송 대기, 성공, 실패 이력을 확인하고 필요한 경우 재발송합니다.",
+    visible: ["adminSecondaryGrid", "alimtalkControl"],
+  },
+};
+
+const ADMIN_SECTION_IDS = [
+  "statGrid",
+  "customerQuotes",
+  "sellerReview",
+  "applications",
+  "applicationDetail",
+  "adminSecondaryGrid",
+  "approvedSellers",
+  "alimtalkControl",
+];
+
+function getCurrentAdminPageKey() {
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (pathname === "/customers") return "customers";
+  if (pathname === "/sellers") return "sellers";
+  if (pathname === "/approved-sellers") return "approvedSellers";
+  if (pathname === "/alimtalk") return "alimtalk";
+  return "dashboard";
+}
+
+function setAdminLoading(isVisible, title = "서버와 연결 중입니다.", text = "잠시만 기다려주세요.") {
+  if (!adminLoadingModal) return;
+  if (isVisible) {
+    adminLoadingCount += 1;
+    if (adminLoadingTitle) adminLoadingTitle.textContent = title;
+    if (adminLoadingText) adminLoadingText.textContent = text;
+    adminLoadingModal.hidden = false;
+    document.body.classList.add("is-admin-loading");
+    return;
+  }
+
+  adminLoadingCount = Math.max(0, adminLoadingCount - 1);
+  if (adminLoadingCount > 0) return;
+  adminLoadingModal.hidden = true;
+  document.body.classList.remove("is-admin-loading");
+}
+
+function navigateAdminPage(pageKey) {
+  const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
+  window.location.href = config.path;
+}
+
+function applyAdminPageView() {
+  const pageKey = getCurrentAdminPageKey();
+  const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
+  document.body.dataset.adminPage = pageKey;
+  document.title = `픽견적 관리자 · ${config.title}`;
+  if (adminShell) adminShell.id = pageKey;
+  if (adminHeaderTitle) adminHeaderTitle.textContent = config.heading;
+  if (adminHeaderCopy) adminHeaderCopy.textContent = config.copy;
+
+  const visible = new Set(config.visible);
+  ADMIN_SECTION_IDS.forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.hidden = !visible.has(id);
+  });
+
+  document.querySelectorAll("[data-admin-nav]").forEach((link) => {
+    link.classList.toggle("is-active", link.dataset.adminNav === pageKey);
+    if (link.dataset.adminNav === pageKey) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
 }
 
 const customerQuoteSection = document.createElement("section");
@@ -137,8 +247,14 @@ function canUseApiServer() {
 async function apiJson(path, options = {}) {
   if (!canUseApiServer()) return null;
 
+  const method = String(options.method || "GET").toUpperCase();
+  setAdminLoading(
+    true,
+    method === "GET" ? "관리자 데이터를 불러오는 중입니다." : "서버에 저장하는 중입니다.",
+    method === "GET" ? "최신 운영 정보를 확인하고 있습니다." : "요청이 완료될 때까지 잠시만 기다려주세요."
+  );
+
   try {
-    const method = String(options.method || "GET").toUpperCase();
     const headers = {
       ...(method === "GET" ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {}),
@@ -153,6 +269,8 @@ async function apiJson(path, options = {}) {
   } catch (error) {
     console.warn("API 요청에 실패했습니다.", error);
     return null;
+  } finally {
+    setAdminLoading(false);
   }
 }
 
@@ -1190,37 +1308,32 @@ function scrollToAdminSection(selector) {
 
 function openStatAction(action) {
   if (action === "customer-quotes") {
-    renderAll();
-    scrollToAdminSection("#customerQuotes");
+    navigateAdminPage("customers");
     return;
   }
 
   if (action === "pending-applications") {
     applicationFilter = "pending";
     selectedApplicationId = "";
-    renderAll();
-    scrollToAdminSection("#applications");
+    navigateAdminPage("sellers");
     return;
   }
 
   if (action === "approved-sellers") {
-    renderAll();
-    scrollToAdminSection("#approvedSellers");
+    navigateAdminPage("approvedSellers");
     return;
   }
 
   if (action === "ready-messages") {
     messageFilter = "all";
-    renderAll();
-    scrollToAdminSection("#messages");
+    navigateAdminPage("alimtalk");
     return;
   }
 
   if (action === "rejected-applications") {
     applicationFilter = "rejected";
     selectedApplicationId = "";
-    renderAll();
-    scrollToAdminSection("#applications");
+    navigateAdminPage("sellers");
   }
 }
 
@@ -1230,6 +1343,7 @@ function renderAll() {
   renderApplications();
   renderApprovedSellers();
   renderMessages();
+  applyAdminPageView();
 
   document.querySelectorAll("[data-application-filter]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.applicationFilter === applicationFilter);
