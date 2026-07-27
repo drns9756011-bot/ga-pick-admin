@@ -537,6 +537,13 @@ button.application-card.is-active {
   white-space: pre-wrap;
 }
 
+.quote-admin-state-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .deleted-quote-log {
   display: grid;
   gap: 12px;
@@ -605,6 +612,26 @@ button.application-card.is-active {
 .status.sent {
   background: #e8f7ef;
   color: #117047;
+}
+
+.status.quote-selected {
+  background: #e6f6ee;
+  color: #107052;
+}
+
+.status.quote-bidding {
+  background: #eaf2ff;
+  color: #2460ad;
+}
+
+.status.quote-choosing {
+  background: #fff4dc;
+  color: #9a640d;
+}
+
+.status.quote-expired {
+  background: #edf1f5;
+  color: #5d6b78;
 }
 
 .status.rejected,

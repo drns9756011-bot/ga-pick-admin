@@ -171,6 +171,7 @@ function normalizeCustomerQuote(row, images = []) {
     memo: row.memo || "",
     status: row.status || "open",
     selectedBidId: row.selected_bid_id || null,
+    bidCount: Number(row.bid_count || 0),
     saleCompletedAt: row.sale_completed_at || "",
     thumbnailImage: row.thumbnail_image || "",
     thumbnailImageKey: row.thumbnail_image_key || "",
@@ -690,7 +691,10 @@ async function getCustomerQuotes(env) {
 
   for (const quote of result.results || []) {
     const images = await getQuoteImages(env, quote.id);
-    rows.push(normalizeCustomerQuote(quote, images));
+    const bidStats = await env.DB.prepare("SELECT COUNT(*) AS bid_count FROM bids WHERE quote_id = ?")
+      .bind(quote.id)
+      .first();
+    rows.push(normalizeCustomerQuote({ ...quote, bid_count: bidStats?.bid_count || 0 }, images));
   }
 
   return json({ ok: true, rows });

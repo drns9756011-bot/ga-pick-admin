@@ -847,6 +847,30 @@ function quoteAlimtalkStatus(quote) {
   return { label: "확인필요", className: "pending" };
 }
 
+function isQuoteTimeExpired(quote) {
+  const deadline = new Date(quote.quoteExpiresAt || "");
+  return Boolean(quote.quoteExpiresAt && !Number.isNaN(deadline.getTime()) && deadline.getTime() <= Date.now());
+}
+
+function customerQuoteStatus(quote) {
+  if (quote.selectedBidId) {
+    return { label: "선택완료", className: "quote-selected", note: "고객님이 판매자 제안을 선택했습니다." };
+  }
+
+  const isClosed = quote.status === "closed" || isQuoteTimeExpired(quote);
+  const bidCount = Number(quote.bidCount || 0);
+
+  if (isClosed && bidCount > 0) {
+    return { label: "제안 선택중", className: "quote-choosing", note: "제안 접수는 종료됐고 고객님 선택을 기다립니다." };
+  }
+
+  if (isClosed) {
+    return { label: "시간마감", className: "quote-expired", note: "48시간 제안 가능 시간이 종료되었습니다." };
+  }
+
+  return { label: "견적제안 중", className: "quote-bidding", note: "판매자가 제안할 수 있는 상태입니다." };
+}
+
 function renderCustomerQuotes() {
   if (!customerQuoteList) return;
 
@@ -854,8 +878,9 @@ function renderCustomerQuotes() {
   customerQuoteList.innerHTML = quotes.length
     ? quotes
         .map((quote) => {
-          const status = quoteAlimtalkStatus(quote);
+          const status = customerQuoteStatus(quote);
           const imagesCount = Array.isArray(quote.images) ? quote.images.length : 0;
+          const bidCount = Number(quote.bidCount || 0);
           return `
             <article class="quote-admin-card">
               <div class="quote-admin-thumb">
@@ -875,6 +900,7 @@ function renderCustomerQuotes() {
                 </div>
                 <div class="quote-admin-meta">
                   <span>견적번호 ${escapeHTML(quote.quoteNumber || "-")}</span>
+                  <span>제안 ${bidCount}건</span>
                   <span>브랜드 ${escapeHTML(quote.desiredBrand || "미입력")}</span>
                   <span>지역 ${escapeHTML(quote.region || "미입력")}</span>
                   <span>저장 ${escapeHTML(formatDate(quote.createdAt))}</span>
@@ -882,6 +908,7 @@ function renderCustomerQuotes() {
                   <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
                   <span>대표 이미지/고객 정보 1년 보관</span>
                 </div>
+                <p class="quote-admin-state-note">${escapeHTML(status.note)}</p>
                 ${quote.memo ? `<p class="quote-admin-memo">${escapeHTML(quote.memo)}</p>` : ""}
                 <div class="quote-admin-actions">
                   <button class="plain-btn small-btn" type="button" data-edit-customer-quote="${escapeHTML(quote.id)}">
