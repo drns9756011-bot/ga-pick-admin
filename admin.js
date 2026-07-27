@@ -831,22 +831,6 @@ function renderApprovedSellers() {
     `;
 }
 
-function getMessagesForQuote(quoteId) {
-  return getMessages().filter((message) => message.relatedId === quoteId);
-}
-
-function quoteAlimtalkStatus(quote) {
-  const related = getMessagesForQuote(quote.id);
-  if (!related.length) return { label: "알림톡 없음", className: "canceled" };
-  if (related.some((message) => message.status === "sent")) return { label: "발송완료", className: "sent" };
-  if (related.some((message) => message.status === "accepted" || message.status === "sending")) {
-    return { label: "접수됨", className: "accepted" };
-  }
-  if (related.some((message) => message.status === "ready")) return { label: "발송대기", className: "ready" };
-  if (related.some((message) => message.status === "canceled")) return { label: "취소", className: "canceled" };
-  return { label: "확인필요", className: "pending" };
-}
-
 function isQuoteTimeExpired(quote) {
   const deadline = new Date(quote.quoteExpiresAt || "");
   return Boolean(quote.quoteExpiresAt && !Number.isNaN(deadline.getTime()) && deadline.getTime() <= Date.now());
@@ -896,7 +880,7 @@ function renderCustomerQuotes() {
                     <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
                     <span>${escapeHTML(quote.customer || "고객님")} · ${escapeHTML(formatPhoneNumber(quote.phone))}</span>
                   </div>
-                  <span class="status ${status.className}">${status.label}</span>
+                  <span class="status ${status.className}">견적 상태 · ${status.label}</span>
                 </div>
                 <div class="quote-admin-meta">
                   <span>견적번호 ${escapeHTML(quote.quoteNumber || "-")}</span>
