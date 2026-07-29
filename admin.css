@@ -654,6 +654,93 @@ button.application-card.is-active {
   font-weight: 800;
 }
 
+.quote-bid-summary {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfdff;
+  overflow: hidden;
+}
+
+.quote-bid-summary summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 950;
+  list-style-position: inside;
+}
+
+.quote-bid-summary summary strong {
+  color: var(--brand);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.quote-bid-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.quote-bid-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 0.7fr) minmax(180px, 1.2fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dfe7ef;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.quote-bid-row.is-selected {
+  border-color: rgba(15, 118, 110, 0.45);
+  background: #f0fdfa;
+}
+
+.quote-bid-row strong,
+.quote-bid-row span {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.quote-bid-row p,
+.quote-bid-row small {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.quote-bid-row em {
+  justify-self: end;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: #fff4d6;
+  color: #8a5b00;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.quote-bid-empty {
+  margin: 0;
+  padding: 0 12px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .deleted-quote-log {
   display: grid;
   gap: 12px;
@@ -1732,6 +1819,24 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
 
   .quote-admin-card {
     grid-template-columns: 1fr;
+  }
+
+  .quote-bid-summary summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quote-bid-summary summary strong {
+    white-space: normal;
+  }
+
+  .quote-bid-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .quote-bid-row em {
+    justify-self: start;
   }
 }
 

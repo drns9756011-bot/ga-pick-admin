@@ -654,6 +654,12 @@ function formatPhoneNumber(value) {
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
 }
 
+function formatWon(value) {
+  const amount = Number(value || 0);
+  if (!amount) return "금액 미입력";
+  return `${amount.toLocaleString("ko-KR")}원`;
+}
+
 function createOptions(options, selectedValue = "") {
   return options
     .map((option) => `<option value="${escapeHTML(option)}"${option === selectedValue ? " selected" : ""}>${escapeHTML(option)}</option>`)
@@ -1048,10 +1054,56 @@ function quoteStatusMeta(quote) {
   if (quote.status === "closed" || (expiresAt && expiresAt <= now)) {
     return { label: "시간마감", className: "quote-closed", note: "견적 제안 시간이 종료되었습니다." };
   }
-  if (quote.bidsCount > 0 || quote.hasBids) {
+  if (Number(quote.bidCount || quote.bidsCount || 0) > 0 || quote.hasBids || (Array.isArray(quote.bids) && quote.bids.length)) {
     return { label: "제안 선택중", className: "quote-choosing", note: "고객님이 받은 제안을 검토 중입니다." };
   }
   return { label: "견적제안 중", className: "quote-bidding", note: "판매자가 제안할 수 있는 상태입니다." };
+}
+
+function renderQuoteBidSummary(quote) {
+  const bids = Array.isArray(quote.bids) ? quote.bids : [];
+  const sortedBids = [...bids].sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+  const lowestBid = sortedBids[0];
+  const selectedBid = sortedBids.find((bid) => bid.id === quote.selectedBidId);
+  const summaryText = sortedBids.length
+    ? `제안 ${sortedBids.length}건 · 최저 ${formatWon(lowestBid?.price)}`
+    : "제안 0건";
+
+  return `
+    <details class="quote-bid-summary">
+      <summary>
+        <span>${escapeHTML(summaryText)}</span>
+        ${selectedBid ? `<strong>선택 매니저 ${escapeHTML(selectedBid.manager || selectedBid.seller || "-")}</strong>` : ""}
+      </summary>
+      ${
+        sortedBids.length
+          ? `<div class="quote-bid-list">
+              ${sortedBids
+                .map((bid, index) => {
+                  const isSelected = bid.id === quote.selectedBidId;
+                  const managerLabel = [bid.manager, bid.managerPosition].filter(Boolean).join(" ");
+                  const branchLabel = [bid.channel, bid.branch].filter(Boolean).join(" ");
+                  return `
+                    <article class="quote-bid-row ${isSelected ? "is-selected" : ""}">
+                      <div>
+                        <strong>${index + 1}위 · ${escapeHTML(formatWon(bid.price))}</strong>
+                        <p>${escapeHTML(branchLabel || bid.seller || "판매자 정보 없음")}</p>
+                      </div>
+                      <div>
+                        <span>${escapeHTML(managerLabel || "매니저 미입력")}</span>
+                        <small>${escapeHTML(formatPhoneNumber(bid.phone) || "연락처 미입력")}</small>
+                      </div>
+                      <p>${escapeHTML(bid.benefits || "제공 조건 미입력")}</p>
+                      ${isSelected ? `<em>고객님 선택</em>` : ""}
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>`
+          : `<p class="quote-bid-empty">아직 판매자 제안이 없습니다.</p>`
+      }
+    </details>
+  `;
 }
 
 function renderCustomerQuotes() {
@@ -1080,8 +1132,10 @@ function renderCustomerQuotes() {
               <span>지역 ${escapeHTML(quote.region || "미입력")}</span>
               <span>등록 ${escapeHTML(formatDate(quote.createdAt))}</span>
               <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
+              <span>제안 ${escapeHTML(String(quote.bidCount || quote.bidsCount || 0))}건</span>
             </div>
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
+            ${renderQuoteBidSummary(quote)}
             <div class="quote-admin-actions">
               <button class="plain-btn small-btn" type="button" data-edit-customer-quote="${escapeHTML(quote.id)}">정보 수정</button>
               <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">견적 삭제</button>

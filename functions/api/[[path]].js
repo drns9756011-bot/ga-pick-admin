@@ -97,7 +97,7 @@ async function hashPassword(password) {
     false,
     ["deriveBits"]
   );
-  const iterations = 120000;
+  const iterations = 100000;
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", hash: "SHA-256", salt, iterations },
     key,
@@ -206,6 +206,7 @@ function normalizeCustomerQuote(row, images = []) {
   if (!row) return null;
   const fullImages = images.filter((image) => image.image_type !== "thumbnail");
   const displayImages = fullImages.length ? fullImages : row.thumbnail_image ? [{ url: row.thumbnail_image }] : [];
+  const bids = Array.isArray(row.bids) ? row.bids : [];
   return {
     id: row.id,
     quoteNumber: row.quote_number,
@@ -219,7 +220,8 @@ function normalizeCustomerQuote(row, images = []) {
     memo: row.memo || "",
     status: row.status || "open",
     selectedBidId: row.selected_bid_id || null,
-    bidCount: Number(row.bid_count || 0),
+    bidCount: Number(row.bid_count || bids.length || 0),
+    bids,
     saleCompletedAt: row.sale_completed_at || "",
     thumbnailImage: row.thumbnail_image || "",
     thumbnailImageKey: row.thumbnail_image_key || "",
@@ -230,6 +232,25 @@ function normalizeCustomerQuote(row, images = []) {
     consent: parseJson(row.consent_json, {}),
     image: displayImages[0]?.url || row.thumbnail_image || "",
     images: displayImages.map((image) => image.url),
+  };
+}
+
+function normalizeBid(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    quoteId: row.quote_id || "",
+    sellerId: row.seller_id || "",
+    seller: row.seller || "",
+    channel: row.channel || "",
+    branch: row.branch || "",
+    manager: row.manager || "",
+    managerPosition: row.manager_position || "",
+    phone: row.phone || "",
+    price: Number(row.price || 0),
+    benefits: row.benefits || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
   };
 }
 
@@ -732,6 +753,18 @@ async function getQuoteImages(env, quoteId) {
   return result.results || [];
 }
 
+async function getQuoteBids(env, quoteId) {
+  const result = await env.DB.prepare(
+    `SELECT *
+     FROM bids
+     WHERE quote_id = ?
+     ORDER BY price ASC, created_at ASC`
+  )
+    .bind(quoteId)
+    .all();
+  return (result.results || []).map(normalizeBid);
+}
+
 async function getCustomerQuotes(env) {
   await ensureCustomerQuoteColumns(env);
   const result = await env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all();
@@ -739,10 +772,8 @@ async function getCustomerQuotes(env) {
 
   for (const quote of result.results || []) {
     const images = await getQuoteImages(env, quote.id);
-    const bidStats = await env.DB.prepare("SELECT COUNT(*) AS bid_count FROM bids WHERE quote_id = ?")
-      .bind(quote.id)
-      .first();
-    rows.push(normalizeCustomerQuote({ ...quote, bid_count: bidStats?.bid_count || 0 }, images));
+    const bids = await getQuoteBids(env, quote.id);
+    rows.push(normalizeCustomerQuote({ ...quote, bid_count: bids.length, bids }, images));
   }
 
   return json({ ok: true, rows });
