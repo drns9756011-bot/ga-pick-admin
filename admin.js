@@ -51,37 +51,42 @@ const ADMIN_PAGE_CONFIG = {
     title: "관리자 대시보드",
     heading: "운영 현황을 한눈에 확인하세요.",
     copy: "카드를 누르면 고객 견적, 판매자 신청, 승인 판매자, 알림톡 상태 페이지로 이동합니다.",
+    visible: ["statGrid", "dashboardHome"],
   },
   customers: {
     path: "/customers",
     title: "고객 견적",
     heading: "고객 견적을 확인하고 필요한 정보를 수정하세요.",
     copy: "서버에 저장된 고객 견적, 선택 상태, 삭제 이력을 관리합니다.",
+    visible: ["statGrid", "customerQuotePanel"],
   },
   sellers: {
     path: "/sellers",
     title: "판매자 신청",
     heading: "판매자 등록 요청을 검토하세요.",
     copy: "신청 상세 정보를 확인하고 승인 또는 반려 처리를 진행합니다.",
+    visible: ["statGrid", "sellerReview", "applications", "applicationDetail"],
   },
   approvedSellers: {
     path: "/approved-sellers",
     title: "승인 판매자",
     heading: "승인된 판매자 계정을 관리하세요.",
     copy: "채널, 지점, 매니저, 직책, 비밀번호 초기화와 계정 삭제를 관리합니다.",
+    visible: ["statGrid", "adminSecondaryGrid", "approvedSellers"],
   },
   alimtalk: {
     path: "/alimtalk",
     title: "알림톡 상태",
     heading: "알림톡 발송 상태를 확인하세요.",
     copy: "발송 대기, 성공, 실패 이력을 확인하고 필요 시 재발송합니다.",
+    visible: ["statGrid", "adminSecondaryGrid", "alimtalkControl"],
   },
 };
 
 const ADMIN_SECTION_IDS = [
   "statGrid",
   "dashboardHome",
-  "customerQuotes",
+  "customerQuotePanel",
   "sellerReview",
   "applications",
   "applicationDetail",
@@ -125,7 +130,7 @@ function applyAdminPageView() {
   const pageKey = getCurrentAdminPageKey();
   const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
   document.body.dataset.adminPage = pageKey;
-  document.title = `?쎄껄??愿由ъ옄 쨌 ${config.title}`;
+  document.title = `픽견적 관리자 · ${config.title}`;
   if (adminShell) adminShell.id = pageKey;
   if (adminHeaderTitle) adminHeaderTitle.textContent = config.heading;
   if (adminHeaderCopy) adminHeaderCopy.textContent = config.copy;
@@ -673,6 +678,16 @@ async function queueAlimtalk(message) {
   return false;
 }
 
+function getFilteredMessages() {
+  return getMessages().filter((message) => {
+    if (messageFilter === "all") return true;
+    if (messageFilter === "accepted") {
+      return message.status === "accepted" || message.status === "sending";
+    }
+    return message.status === messageFilter;
+  });
+}
+
 function getFilteredApplications() {
   const query = applicationSearch.value.trim().toLowerCase();
   return getApplications().filter((application) => {
@@ -1217,7 +1232,7 @@ function openStatAction(action) {
 }
 
 function renderAll() {
-  renderDashboardStats();
+  renderStatsCards();
   renderCustomerQuotes();
   renderApplications();
   renderApprovedSellers();
@@ -1379,8 +1394,9 @@ window.addEventListener("storage", (event) => {
   renderAll();
 });
 
-if (initialApplicationId) {
-  selectedApplicationId = initialApplicationId;
+const initialApplicationIdFromUrl = new URLSearchParams(window.location.search).get("applicationId") || "";
+if (initialApplicationIdFromUrl) {
+  selectedApplicationId = initialApplicationIdFromUrl;
   applicationFilter = "all";
 }
 
