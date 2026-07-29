@@ -240,6 +240,45 @@ document.body.appendChild(editApprovedSellerModal);
 const editCustomerQuoteForm = document.querySelector("#editCustomerQuoteForm");
 const editApprovedSellerForm = document.querySelector("#editApprovedSellerForm");
 
+const adminTextModal = document.createElement("div");
+adminTextModal.className = "admin-modal admin-text-modal";
+adminTextModal.id = "adminTextModal";
+adminTextModal.hidden = true;
+adminTextModal.innerHTML = `
+  <div class="admin-modal-dialog admin-text-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTextModalTitle">
+    <div class="admin-modal-head">
+      <div>
+        <p class="eyebrow" id="adminTextModalEyebrow">Admin Confirm</p>
+        <h2 id="adminTextModalTitle">입력 확인</h2>
+      </div>
+      <button class="modal-close-btn" type="button" data-admin-text-cancel aria-label="닫기">×</button>
+    </div>
+    <form class="admin-edit-form" id="adminTextModalForm">
+      <p class="admin-modal-description" id="adminTextModalDescription"></p>
+      <label class="admin-text-input-label" id="adminTextModalLabel">
+        <span>입력</span>
+        <input type="text" id="adminTextModalInput" autocomplete="off" />
+        <textarea id="adminTextModalTextarea" rows="5"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="ghost-btn" type="button" data-admin-text-cancel>취소</button>
+        <button class="primary-btn" type="submit" id="adminTextModalConfirm">확인</button>
+      </div>
+    </form>
+  </div>
+`;
+document.body.appendChild(adminTextModal);
+
+const adminTextModalForm = document.querySelector("#adminTextModalForm");
+const adminTextModalTitle = document.querySelector("#adminTextModalTitle");
+const adminTextModalEyebrow = document.querySelector("#adminTextModalEyebrow");
+const adminTextModalDescription = document.querySelector("#adminTextModalDescription");
+const adminTextModalLabelText = document.querySelector("#adminTextModalLabel span");
+const adminTextModalInput = document.querySelector("#adminTextModalInput");
+const adminTextModalTextarea = document.querySelector("#adminTextModalTextarea");
+const adminTextModalConfirm = document.querySelector("#adminTextModalConfirm");
+let adminTextModalResolver = null;
+
 function canUseApiServer() {
   return window.location.protocol !== "file:";
 }
@@ -248,10 +287,59 @@ function readAdminApiToken() {
   return localStorage.getItem(STORAGE_KEYS.adminApiToken) || "";
 }
 
-function requestAdminApiToken() {
+function closeAdminTextModal(value = null) {
+  if (adminTextModalResolver) {
+    adminTextModalResolver(value);
+    adminTextModalResolver = null;
+  }
+  adminTextModal.hidden = true;
+  adminTextModalInput.value = "";
+  adminTextModalTextarea.value = "";
+}
+
+function openAdminTextModal(options = {}) {
+  const {
+    eyebrow = "Admin Confirm",
+    title = "입력 확인",
+    description = "",
+    label = "입력",
+    value = "",
+    multiline = false,
+    inputType = "text",
+    confirmText = "확인",
+    danger = false,
+  } = options;
+
+  return new Promise((resolve) => {
+    adminTextModalResolver = resolve;
+    adminTextModalEyebrow.textContent = eyebrow;
+    adminTextModalTitle.textContent = title;
+    adminTextModalDescription.textContent = description;
+    adminTextModalDescription.hidden = !description;
+    adminTextModalLabelText.textContent = label;
+    adminTextModalConfirm.textContent = confirmText;
+    adminTextModalConfirm.classList.toggle("danger-action", Boolean(danger));
+    adminTextModalInput.hidden = multiline;
+    adminTextModalTextarea.hidden = !multiline;
+    adminTextModalInput.type = inputType;
+    adminTextModalInput.value = value;
+    adminTextModalTextarea.value = value;
+    adminTextModal.hidden = false;
+    setTimeout(() => (multiline ? adminTextModalTextarea : adminTextModalInput).focus(), 0);
+  });
+}
+
+async function requestAdminApiToken() {
   const current = readAdminApiToken();
   if (current) return current;
-  const next = window.prompt("관리자 API 토큰을 입력해주세요.", "");
+  const next = await openAdminTextModal({
+    eyebrow: "Admin Token",
+    title: "관리자 인증 토큰 입력",
+    description: "관리자 데이터 조회와 저장을 위해 발급받은 API 토큰을 입력해주세요.",
+    label: "관리자 API 토큰",
+    inputType: "password",
+    confirmText: "토큰 저장",
+  });
   if (!next) return "";
   const token = next.trim();
   localStorage.setItem(STORAGE_KEYS.adminApiToken, token);
@@ -262,6 +350,12 @@ async function apiJson(path, options = {}) {
   if (!canUseApiServer()) return null;
 
   const method = String(options.method || "GET").toUpperCase();
+  const adminToken = await requestAdminApiToken();
+  if (!adminToken) {
+    showToast("관리자 API 토큰이 필요합니다.");
+    return null;
+  }
+
   setAdminLoading(
     true,
     method === "GET" ? "관리자 데이터를 불러오는 중입니다." : "서버에 저장하는 중입니다.",
@@ -269,11 +363,6 @@ async function apiJson(path, options = {}) {
   );
 
   try {
-    const adminToken = requestAdminApiToken();
-    if (!adminToken) {
-      showToast("관리자 API 토큰이 필요합니다.");
-      return null;
-    }
     const headers = {
       ...(method === "GET" ? {} : { "Content-Type": "application/json" }),
       "X-Admin-Token": adminToken,
@@ -1132,15 +1221,21 @@ async function deleteApprovedSeller(sellerId) {
 async function deleteCustomerQuote(quoteId) {
   const quote = getCustomerQuotes().find((row) => row.id === quoteId);
   if (!quote) return;
-  const reason = window.prompt(`${quote.customer || "고객"}님의 견적을 삭제합니다.\n견적, 이미지, 제안, 후기는 서버에서 완전히 삭제됩니다.\n삭제 사유를 입력해주세요.`, "");
+  const reason = await openAdminTextModal({
+    eyebrow: "Delete Quote",
+    title: "고객 견적 삭제",
+    description: `${quote.customer || "고객"}님의 견적을 서버에서 완전히 삭제합니다. 삭제 후에는 견적, 이미지, 제안, 후기를 복구할 수 없고 고객명, 연락처, 삭제 사유만 기록됩니다.`,
+    label: "삭제 사유",
+    multiline: true,
+    confirmText: "견적 삭제",
+    danger: true,
+  });
   if (reason === null) return;
   const trimmedReason = String(reason).trim();
   if (trimmedReason.length < 2) {
     showToast("삭제 사유를 입력해야 견적을 삭제할 수 있습니다.");
     return;
   }
-  const confirmed = window.confirm(`정말 이 견적을 삭제할까요?\n고객명: ${quote.customer || "-"}\n연락처: ${formatPhoneNumber(quote.phone)}\n사유: ${trimmedReason}`);
-  if (!confirmed) return;
   writeStorageArray(STORAGE_KEYS.customerQuotes, getCustomerQuotes().filter((row) => row.id !== quoteId));
   renderAll();
   const ok = await syncCustomerQuoteDeleteToServer(quoteId, trimmedReason);
@@ -1248,6 +1343,11 @@ function renderAll() {
 }
 
 document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-admin-text-cancel]") || event.target === adminTextModal) {
+    closeAdminTextModal(null);
+    return;
+  }
+
   const statAction = event.target.closest("[data-stat-action]");
   if (statAction) {
     openStatAction(statAction.dataset.statAction);
@@ -1361,9 +1461,18 @@ document.addEventListener("input", (event) => {
 
 editCustomerQuoteForm?.addEventListener("submit", submitCustomerQuoteEdit);
 editApprovedSellerForm?.addEventListener("submit", submitApprovedSellerEdit);
+adminTextModalForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = adminTextModalTextarea.hidden ? adminTextModalInput.value : adminTextModalTextarea.value;
+  closeAdminTextModal(value);
+});
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (!adminTextModal.hidden) {
+      closeAdminTextModal(null);
+      return;
+    }
     closeAdminModals();
     return;
   }
