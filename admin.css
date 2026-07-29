@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #eef2f5;
   --panel: #ffffff;
   --ink: #14212d;
@@ -320,6 +320,19 @@ button:disabled {
   color: var(--muted);
   font-size: 14px;
   font-weight: 700;
+}
+
+.quote-summary-card {
+  gap: 9px;
+}
+
+.quote-summary-card strong {
+  white-space: nowrap;
+}
+
+.quote-summary-card p {
+  line-height: 1.55;
+  word-break: keep-all;
 }
 
 .dashboard-home {
@@ -1672,3 +1685,4 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
     grid-template-columns: 1fr;
   }
 }
+

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS seller_applications (
+﻿CREATE TABLE IF NOT EXISTS seller_applications (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'pending',
   requested_at TEXT NOT NULL,
@@ -153,3 +153,4 @@ CREATE TABLE IF NOT EXISTS deleted_quote_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at);
+

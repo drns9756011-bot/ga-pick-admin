@@ -1,76 +1,75 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>픽견적 관리자</title>
-    <meta name="description" content="픽견적 판매자 신청, 고객 견적, 알림톡 발송 상태를 관리하는 운영자 페이지입니다." />
-    <link rel="stylesheet" href="/admin.css?v=20260728-approved-seller-table" />
-    <script defer src="/admin.js?v=20260728-approved-seller-table"></script>
+    <title>?쎄껄??愿由ъ옄</title>
+    <meta name="description" content="?쎄껄???먮ℓ???좎껌, 怨좉컼 寃ъ쟻, ?뚮┝??諛쒖넚 ?곹깭瑜?愿由ы븯???댁쁺???섏씠吏?낅땲??" />
+    <link rel="stylesheet" href="/admin.css?v=20260728-admin-security-retention" />
+    <script defer src="/admin.js?v=20260728-admin-security-retention"></script>
   </head>
   <body>
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="픽견적 관리자 홈">
+      <a class="brand" href="/" aria-label="?쎄껄??愿由ъ옄 ??>
         <span class="brand-mark">P</span>
         <span>
-          픽견적
-          <small>관리자 콘솔</small>
+          ?쎄껄??          <small>愿由ъ옄 肄섏넄</small>
         </span>
       </a>
-      <nav class="side-nav" aria-label="관리자 메뉴">
-        <span class="nav-label">운영 메뉴</span>
-        <a href="/" data-admin-nav="dashboard">관리 현황</a>
-        <a href="/customers" data-admin-nav="customers">고객 견적</a>
-        <a href="/sellers" data-admin-nav="sellers">판매자 신청</a>
-        <a href="/approved-sellers" data-admin-nav="approvedSellers">승인 판매자</a>
-        <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
+      <nav class="side-nav" aria-label="愿由ъ옄 硫붾돱">
+        <span class="nav-label">?댁쁺 硫붾돱</span>
+        <a href="/" data-admin-nav="dashboard">愿由??꾪솴</a>
+        <a href="/customers" data-admin-nav="customers">怨좉컼 寃ъ쟻</a>
+        <a href="/sellers" data-admin-nav="sellers">?먮ℓ???좎껌</a>
+        <a href="/approved-sellers" data-admin-nav="approvedSellers">?뱀씤 ?먮ℓ??/a>
+        <a href="/alimtalk" data-admin-nav="alimtalk">?뚮┝???곹깭</a>
       </nav>
-      <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면으로</a>
+      <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">?쒕퉬???붾㈃?쇰줈</a>
     </aside>
 
     <main class="admin-shell" id="dashboard">
       <header class="admin-header">
         <div>
           <p class="eyebrow">Back Office</p>
-          <h1>판매자 신청과 고객 견적을 한곳에서 관리하세요.</h1>
-          <p class="header-copy">승인 대기, 저장된 고객 견적, 알림톡 상태, 승인 판매자 계정을 운영자가 빠르게 확인할 수 있습니다.</p>
+          <h1>?먮ℓ???좎껌怨?怨좉컼 寃ъ쟻???쒓납?먯꽌 愿由ы븯?몄슂.</h1>
+          <p class="header-copy">?뱀씤 ?湲? ??λ맂 怨좉컼 寃ъ쟻, ?뚮┝???곹깭, ?뱀씤 ?먮ℓ??怨꾩젙???댁쁺?먭? 鍮좊Ⅴ寃??뺤씤?????덉뒿?덈떎.</p>
         </div>
         <div class="admin-actions">
-          <a class="ghost-btn" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면</a>
-          <button class="primary-btn" id="refreshBtn" type="button">새로고침</button>
+          <a class="ghost-btn" href="https://ga-pick.com/" target="_blank" rel="noopener">?쒕퉬???붾㈃</a>
+          <button class="primary-btn" id="refreshBtn" type="button">?덈줈怨좎묠</button>
         </div>
       </header>
 
-      <section class="stat-grid" id="statGrid" aria-label="관리 현황"></section>
+      <section class="stat-grid" id="statGrid" aria-label="愿由??꾪솴"></section>
 
-      <section class="dashboard-home" id="dashboardHome" aria-label="관리자 대시보드 바로가기">
+      <section class="dashboard-home" id="dashboardHome" aria-label="愿由ъ옄 ??쒕낫??諛붾줈媛湲?>
         <div class="dashboard-home-head">
           <div>
             <p class="eyebrow">Operations</p>
-            <h2>필요한 업무만 골라 빠르게 확인하세요.</h2>
+            <h2>?꾩슂???낅Т留?怨⑤씪 鍮좊Ⅴ寃??뺤씤?섏꽭??</h2>
           </div>
-          <p>고객 견적, 판매자 신청, 승인 계정, 알림톡 상태를 각각 분리해서 관리합니다.</p>
+          <p>怨좉컼 寃ъ쟻, ?먮ℓ???좎껌, ?뱀씤 怨꾩젙, ?뚮┝???곹깭瑜?媛곴컖 遺꾨━?댁꽌 愿由ы빀?덈떎.</p>
         </div>
         <div class="dashboard-link-grid">
           <a class="dashboard-link-card" href="/customers">
             <span>01</span>
-            <strong>고객 견적</strong>
-            <p>등록된 견적, 선택 상태, 삭제 이력을 확인합니다.</p>
+            <strong>怨좉컼 寃ъ쟻</strong>
+            <p>?깅줉??寃ъ쟻, ?좏깮 ?곹깭, ??젣 ?대젰???뺤씤?⑸땲??</p>
           </a>
           <a class="dashboard-link-card" href="/sellers">
             <span>02</span>
-            <strong>판매자 신청</strong>
-            <p>신규 등록 요청을 검토하고 승인 또는 반려합니다.</p>
+            <strong>?먮ℓ???좎껌</strong>
+            <p>?좉퇋 ?깅줉 ?붿껌??寃?좏븯怨??뱀씤 ?먮뒗 諛섎젮?⑸땲??</p>
           </a>
           <a class="dashboard-link-card" href="/approved-sellers">
             <span>03</span>
-            <strong>승인 판매자</strong>
-            <p>판매자 계정, 지점, 매니저 정보를 관리합니다.</p>
+            <strong>?뱀씤 ?먮ℓ??/strong>
+            <p>?먮ℓ??怨꾩젙, 吏?? 留ㅻ땲? ?뺣낫瑜?愿由ы빀?덈떎.</p>
           </a>
           <a class="dashboard-link-card" href="/alimtalk">
             <span>04</span>
-            <strong>알림톡 상태</strong>
-            <p>발송 결과와 실패 이력을 확인하고 재발송합니다.</p>
+            <strong>?뚮┝???곹깭</strong>
+            <p>諛쒖넚 寃곌낵? ?ㅽ뙣 ?대젰???뺤씤?섍퀬 ?щ컻?≫빀?덈떎.</p>
           </a>
         </div>
       </section>
@@ -80,18 +79,17 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Seller Review</p>
-              <h2>판매자 등록 신청</h2>
+              <h2>?먮ℓ???깅줉 ?좎껌</h2>
             </div>
-            <div class="segmented" aria-label="신청 상태 필터">
-              <button class="is-active" type="button" data-application-filter="pending">대기</button>
-              <button type="button" data-application-filter="approved">승인</button>
-              <button type="button" data-application-filter="rejected">반려</button>
-              <button type="button" data-application-filter="all">전체</button>
+            <div class="segmented" aria-label="?좎껌 ?곹깭 ?꾪꽣">
+              <button class="is-active" type="button" data-application-filter="pending">?湲?/button>
+              <button type="button" data-application-filter="approved">?뱀씤</button>
+              <button type="button" data-application-filter="rejected">諛섎젮</button>
+              <button type="button" data-application-filter="all">?꾩껜</button>
             </div>
           </div>
           <label class="search-box">
-            신청 검색
-            <input id="applicationSearch" type="search" placeholder="지점명, 매니저명, 아이디, 연락처 검색" />
+            ?좎껌 寃??            <input id="applicationSearch" type="search" placeholder="吏?먮챸, 留ㅻ땲?紐? ?꾩씠?? ?곕씫泥?寃?? />
           </label>
           <div class="application-list" id="applicationList"></div>
         </section>
@@ -104,17 +102,17 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Approved Sellers</p>
-              <h2>승인 판매자</h2>
+              <h2>?뱀씤 ?먮ℓ??/h2>
             </div>
           </div>
           <div class="seller-table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>지점명</th>
-                  <th>매니저</th>
-                  <th>담당 지역</th>
-                  <th>아이디</th>
+                  <th>吏?먮챸</th>
+                  <th>留ㅻ땲?</th>
+                  <th>?대떦 吏??/th>
+                  <th>?꾩씠??/th>
                 </tr>
               </thead>
               <tbody id="approvedSellerRows"></tbody>
@@ -126,13 +124,13 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Alimtalk</p>
-              <h2>알림톡 발송 상태</h2>
+              <h2>?뚮┝??諛쒖넚 ?곹깭</h2>
             </div>
-            <div class="segmented" aria-label="알림톡 상태 필터">
-              <button type="button" data-message-filter="ready">대기</button>
-              <button type="button" data-message-filter="accepted">접수됨</button>
-              <button type="button" data-message-filter="sent">발송완료</button>
-              <button class="is-active" type="button" data-message-filter="all">전체</button>
+            <div class="segmented" aria-label="?뚮┝???곹깭 ?꾪꽣">
+              <button type="button" data-message-filter="ready">?湲?/button>
+              <button type="button" data-message-filter="accepted">?묒닔??/button>
+              <button type="button" data-message-filter="sent">諛쒖넚?꾨즺</button>
+              <button class="is-active" type="button" data-message-filter="all">?꾩껜</button>
             </div>
           </div>
           <div class="message-list" id="messageList"></div>
@@ -143,11 +141,13 @@
     <div class="admin-loading-modal" id="adminLoadingModal" role="status" aria-live="polite" hidden>
       <div class="admin-loading-box">
         <span class="admin-loading-spinner" aria-hidden="true"></span>
-        <strong id="adminLoadingTitle">서버와 연결 중입니다.</strong>
-        <p id="adminLoadingText">잠시만 기다려주세요.</p>
+        <strong id="adminLoadingTitle">?쒕쾭? ?곌껐 以묒엯?덈떎.</strong>
+        <p id="adminLoadingText">?좎떆留?湲곕떎?ㅼ＜?몄슂.</p>
       </div>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   </body>
 </html>
+
+

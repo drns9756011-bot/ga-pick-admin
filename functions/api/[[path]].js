@@ -2,7 +2,7 @@
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
 const SOLAPI_DEFAULTS = {
@@ -12,6 +12,7 @@ const SOLAPI_DEFAULTS = {
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED: "KA01TP260721025042754h4ZUWHp0Vl8",
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED: "KA01TP2607210258227887LLx9OshNug",
   SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED: "KA01TP260721025517053z5NPvs1ZUIX",
+  SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION: "KA01TP2607210300081256MK0cxuHata",
   SOLAPI_TEMPLATE_SELLER_BID_SELECTED: "KA01TP260721133628815TgDs1sAwUhc",
   SOLAPI_TEMPLATE_SELLER_APPROVED: "KA01TP2607211355258674q0EFuag5GE",
   SOLAPI_TEMPLATE_SELLER_REJECTED: "KA01TP260723100412983h6pYV7vWwi5",
@@ -26,6 +27,18 @@ function json(payload, status = 200) {
     status,
     headers: jsonHeaders,
   });
+}
+
+function getAdminToken(env) {
+  return String(env.ADMIN_API_TOKEN || "").trim();
+}
+
+function requireAdmin(request, env) {
+  const expected = getAdminToken(env);
+  if (!expected) return json({ ok: false, message: "ADMIN_API_TOKEN 설정이 필요합니다." }, 500);
+  const actual = String(request.headers.get("X-Admin-Token") || "").trim();
+  if (actual !== expected) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
+  return null;
 }
 
 function createId(prefix) {
@@ -62,6 +75,43 @@ function formatPhoneNumber(value) {
   return value || digits;
 }
 
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function hexToBytes(hex) {
+  const clean = String(hex || "").trim();
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = parseInt(clean.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(password || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const iterations = 120000;
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    key,
+    256
+  );
+  return `pbkdf2$${iterations}$${bytesToHex(salt)}$${bytesToHex(new Uint8Array(bits))}`;
+}
+
+async function protectStoredPassword(storedPassword) {
+  const stored = String(storedPassword || "");
+  if (!stored) return "";
+  return stored.startsWith("pbkdf2$") ? stored : hashPassword(stored);
+}
+
 function normalizeSellerApplication(row) {
   if (!row) return null;
   return {
@@ -71,7 +121,6 @@ function normalizeSellerApplication(row) {
     reviewedAt: row.reviewed_at || "",
     reviewMemo: row.review_memo || "",
     sellerId: row.seller_id,
-    password: row.password,
     channel: row.channel,
     branch: row.branch,
     branchRegion: row.branch_region,
@@ -91,7 +140,6 @@ function normalizeApprovedSeller(row) {
     id: row.id,
     status: row.status,
     sellerId: row.seller_id,
-    password: row.password,
     channel: row.channel,
     branch: row.branch,
     branchRegion: row.branch_region,
@@ -357,6 +405,7 @@ function getSolapiTemplateId(env, type) {
       "customer-quote-received": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED"),
       "customer-bid-received": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
       "customer-quote-closed": solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
+      "seller-application-received": solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
       "seller-bid-selected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
       "seller-approved": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
       "seller-rejected": solapiValue(env, "SOLAPI_TEMPLATE_SELLER_REJECTED"),
@@ -534,9 +583,8 @@ async function getSellerApplications(env) {
 
 async function updateSellerApplication(env, request, id) {
   const body = await request.json();
-  const row = normalizeSellerApplication(
-    await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first()
-  );
+  const rawRow = await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first();
+  const row = normalizeSellerApplication(rawRow);
   if (!row) return json({ ok: false, message: "신청 정보를 찾을 수 없습니다." }, 404);
 
   const status = body.status || row.status;
@@ -568,7 +616,7 @@ async function updateSellerApplication(env, request, id) {
         updated.id,
         "approved",
         updated.sellerId,
-        updated.password,
+        await protectStoredPassword(rawRow.password),
         updated.channel,
         updated.branch,
         updated.branchRegion,
@@ -813,7 +861,7 @@ async function updateApprovedSeller(env, request, id) {
       return json({ ok: false, message: "새 비밀번호는 4자 이상으로 입력해주세요." }, 400);
     }
     updates.push("password = ?");
-    values.push(nextPassword);
+    values.push(await hashPassword(nextPassword));
   }
 
   if (Object.prototype.hasOwnProperty.call(body, "managerPosition")) {
@@ -929,6 +977,7 @@ function getSolapiHealth(env) {
     customerQuoteReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED"),
     customerQuoteClosed: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED"),
     customerBidReceived: solapiValue(env, "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED"),
+    adminSellerApplication: solapiValue(env, "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION"),
     sellerBidSelected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_BID_SELECTED"),
     sellerApproved: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_APPROVED"),
     sellerRejected: solapiValue(env, "SOLAPI_TEMPLATE_SELLER_REJECTED"),
@@ -949,6 +998,7 @@ function getSolapiHealth(env) {
       !templates.customerQuoteReceived && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED",
       !templates.customerQuoteClosed && "SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED",
       !templates.customerBidReceived && "SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED",
+      !templates.adminSellerApplication && "SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION",
       !templates.sellerBidSelected && "SOLAPI_TEMPLATE_SELLER_BID_SELECTED",
       !templates.sellerApproved && "SOLAPI_TEMPLATE_SELLER_APPROVED",
       !templates.sellerRejected && "SOLAPI_TEMPLATE_SELLER_REJECTED",
@@ -986,6 +1036,8 @@ export async function onRequest(context) {
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: jsonHeaders });
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
@@ -1023,3 +1075,4 @@ export async function onRequest(context) {
 
   return json({ ok: false, message: "API를 찾을 수 없습니다." }, 404);
 }
+
