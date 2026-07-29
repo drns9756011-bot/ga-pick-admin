@@ -12,7 +12,7 @@ const SOLAPI_DEFAULTS = {
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_RECEIVED: "KA01TP260725102717135cJKdPONLQG6",
   SOLAPI_TEMPLATE_CUSTOMER_QUOTE_CLOSED: "KA01TP260725102108064eaQr0cpVqwj",
   SOLAPI_TEMPLATE_CUSTOMER_BID_RECEIVED: "KA01TP260725102553611B0oIQcJ0RCF",
-  SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION: "KA01TP260725101616235ziVJkZImZ9O",
+  SOLAPI_TEMPLATE_ADMIN_SELLER_APPLICATION: "KA01TP2607210300081256MK0cxuHata",
   SOLAPI_TEMPLATE_SELLER_BID_SELECTED: "KA01TP260725101805441M3apRU3OCMB",
   SOLAPI_TEMPLATE_SELLER_APPROVED: "KA01TP260725101616235ziVJkZImZ9O",
   SOLAPI_TEMPLATE_SELLER_REJECTED: "KA01TP260725102900428RYxfTGV9SoG",
@@ -1069,6 +1069,9 @@ export async function onRequest(context) {
   const method = request.method;
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: jsonHeaders });
+  if (path.startsWith("files/") && method === "GET") {
+    return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
   const denied = requireAdmin(request, env);
   if (denied) return denied;
@@ -1105,7 +1108,6 @@ export async function onRequest(context) {
   if (path === "solapi-health" && method === "GET") return getSolapiHealth(env);
 
   if (path === "uploads" && method === "POST") return uploadFile(env, request);
-  if (path.startsWith("files/") && method === "GET") return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
 
   return json({ ok: false, message: "API를 찾을 수 없습니다." }, 404);
 }
