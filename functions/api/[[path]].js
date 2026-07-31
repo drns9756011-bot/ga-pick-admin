@@ -841,6 +841,13 @@ async function getLplanTrainingQuotes(env, request) {
     `SELECT COUNT(*) AS total, MAX(synced_at) AS latest_synced_at
        FROM lplan_quote_patterns`
   ).first();
+  const branchRows = await env.DB.prepare(
+    `SELECT COALESCE(NULLIF(branch, ''), '지점 미기록') AS branch, COUNT(*) AS count, MAX(synced_at) AS latest_synced_at
+       FROM lplan_quote_patterns
+       GROUP BY COALESCE(NULLIF(branch, ''), '지점 미기록')
+       ORDER BY count DESC, latest_synced_at DESC
+       LIMIT 20`
+  ).all();
   const result = await env.DB.prepare(
     `SELECT id, source_quote_id, title, source_saved_at, synced_at, branch, membership_type,
             item_count, total_reg_price, total_point, total_cashback, combo_key, rows_json
@@ -856,6 +863,11 @@ async function getLplanTrainingQuotes(env, request) {
     summary: {
       total: Number(summary?.total || 0),
       latestSyncedAt: summary?.latest_synced_at || "",
+      branches: (branchRows.results || []).map((row) => ({
+        branch: row.branch || "지점 미기록",
+        count: Number(row.count || 0),
+        latestSyncedAt: row.latest_synced_at || "",
+      })),
     },
     rows: (result.results || []).map(normalizeLplanTrainingQuote),
   });

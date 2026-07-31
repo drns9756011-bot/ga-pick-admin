@@ -15,6 +15,8 @@ let selectedApplicationId = "";
 let messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
 let customerQuoteSyncError = "";
 let lplanSyncError = "";
+let lplanSyncing = false;
+let lplanLastCheckedAt = "";
 const SELLER_CHANNELS = [
   "LG전자 BEST SHOP",
   "롯데하이마트",
@@ -183,13 +185,18 @@ lplanSyncSection.innerHTML = `
       <p class="eyebrow">LPLAN SYNC</p>
       <h2>엘플랜 견적 학습 동기화</h2>
     </div>
-    <p class="panel-note">엘플랜에서 개인정보를 제외하고 넘어온 모델 구성 데이터를 확인합니다.</p>
+    <div class="panel-actions">
+      <button class="plain-btn small-btn" type="button" data-force-lplan-sync>엘플랜 학습동기화</button>
+      <p class="panel-note">엘플랜에서 개인정보를 제외하고 넘어온 모델 구성 데이터를 확인합니다.</p>
+    </div>
   </div>
   <div class="lplan-sync-summary" id="lplanSyncSummary"></div>
+  <div class="lplan-branch-summary" id="lplanBranchSummary"></div>
   <div class="lplan-sync-list" id="lplanSyncList"></div>
 `;
 customerQuoteSection.insertAdjacentElement("afterend", lplanSyncSection);
 const lplanSyncSummary = document.querySelector("#lplanSyncSummary");
+const lplanBranchSummary = document.querySelector("#lplanBranchSummary");
 const lplanSyncList = document.querySelector("#lplanSyncList");
 
 const editCustomerQuoteModal = document.createElement("div");
@@ -372,17 +379,21 @@ async function apiJson(path, options = {}) {
   if (!canUseApiServer()) return null;
 
   const method = String(options.method || "GET").toUpperCase();
+  const silent = Boolean(options.silent);
+  const { silent: _silent, ...fetchOptions } = options;
   const adminToken = await requestAdminApiToken();
   if (!adminToken) {
     showToast("관리자 API 토큰이 필요합니다.");
     return null;
   }
 
-  setAdminLoading(
-    true,
-    method === "GET" ? "관리자 데이터를 불러오는 중입니다." : "서버에 저장하는 중입니다.",
-    method === "GET" ? "최신 운영 정보를 확인하고 있습니다." : "요청이 완료될 때까지 잠시만 기다려주세요."
-  );
+  if (!silent) {
+    setAdminLoading(
+      true,
+      method === "GET" ? "관리자 데이터를 불러오는 중입니다." : "서버에 저장하는 중입니다.",
+      method === "GET" ? "최신 운영 정보를 확인하고 있습니다." : "요청이 완료될 때까지 잠시만 기다려주세요."
+    );
+  }
 
   try {
     const headers = {
@@ -393,7 +404,7 @@ async function apiJson(path, options = {}) {
     const response = await fetch(path, {
       cache: "no-store",
       headers,
-      ...options,
+      ...fetchOptions,
     });
     if (!response.ok) {
       if (response.status === 401) localStorage.removeItem(STORAGE_KEYS.adminApiToken);
@@ -404,7 +415,7 @@ async function apiJson(path, options = {}) {
     console.warn("API 요청에 실패했습니다.", error);
     return null;
   } finally {
-    setAdminLoading(false);
+    if (!silent) setAdminLoading(false);
   }
 }
 
@@ -444,22 +455,45 @@ async function loadCustomerQuotesFromServer() {
   return null;
 }
 
-async function loadLplanTrainingFromServer() {
+async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
-  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=12&ts=${timestamp}`);
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
+  const requestOptions = options.silent ? { silent: true } : {};
+  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
   if (localTraining?.ok && Array.isArray(localTraining.rows)) {
     lplanSyncError = "";
+    lplanLastCheckedAt = new Date().toISOString();
     return localTraining;
   }
 
-  const publicTraining = await apiJson(`${PUBLIC_API_BASE}/api/lplan-training-quotes?limit=12&ts=${timestamp}`);
+  const publicTraining = await apiJson(`${PUBLIC_API_BASE}/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
   if (publicTraining?.ok && Array.isArray(publicTraining.rows)) {
     lplanSyncError = "";
+    lplanLastCheckedAt = new Date().toISOString();
     return publicTraining;
   }
 
   lplanSyncError = "엘플랜 동기화 데이터를 불러오지 못했습니다. 엘플랜 저장 API와 관리자 DB 연결을 확인해주세요.";
+  lplanLastCheckedAt = new Date().toISOString();
   return null;
+}
+
+async function forceLplanTrainingSync() {
+  if (lplanSyncing) return;
+  lplanSyncing = true;
+  renderLplanSyncPanel();
+  const result = await loadLplanTrainingFromServer({ limit: 100 });
+  if (result?.ok && Array.isArray(result.rows)) {
+    writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, result.rows);
+    if (result.summary) {
+      localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(result.summary));
+    }
+    showToast(`엘플랜 학습 데이터 ${result.summary?.total ?? result.rows.length}건을 확인했습니다.`);
+  } else {
+    showToast(lplanSyncError || "엘플랜 학습 데이터를 확인하지 못했습니다.");
+  }
+  lplanSyncing = false;
+  renderAll();
 }
 
 async function loadAdminDataFromServer() {
@@ -710,6 +744,21 @@ function getLplanTrainingSummary() {
   } catch (error) {
     return {};
   }
+}
+
+function getLplanBranchSummary(rows, summary) {
+  if (Array.isArray(summary?.branches) && summary.branches.length) return summary.branches;
+  const branchMap = new Map();
+  rows.forEach((row) => {
+    const branch = row.branch || "지점 미기록";
+    const current = branchMap.get(branch) || { branch, count: 0, latestSyncedAt: "" };
+    current.count += 1;
+    if (!current.latestSyncedAt || String(row.syncedAt || "") > current.latestSyncedAt) {
+      current.latestSyncedAt = row.syncedAt || "";
+    }
+    branchMap.set(branch, current);
+  });
+  return Array.from(branchMap.values()).sort((a, b) => b.count - a.count);
 }
 
 function escapeHTML(value) {
@@ -1243,10 +1292,12 @@ function renderLplanSyncPanel() {
   const summary = getLplanTrainingSummary();
   const latestSyncedAt = summary.latestSyncedAt || rows[0]?.syncedAt || "";
   const total = Number(summary.total || rows.length || 0);
+  const branchRows = getLplanBranchSummary(rows, summary);
+  const checkedAtText = lplanLastCheckedAt ? formatDate(lplanLastCheckedAt) : "자동 확인 대기";
 
   lplanSyncSummary.innerHTML = `
     <article>
-      <span>동기화 누적</span>
+      <span>현재 엘플랜 저장 견적</span>
       <strong>${escapeHTML(String(total))}건</strong>
     </article>
     <article>
@@ -1254,10 +1305,34 @@ function renderLplanSyncPanel() {
       <strong>${escapeHTML(latestSyncedAt ? formatDate(latestSyncedAt) : "기록 없음")}</strong>
     </article>
     <article>
-      <span>상태</span>
-      <strong>${escapeHTML(lplanSyncError ? "확인 필요" : total ? "연결 확인" : "대기 중")}</strong>
+      <span>실시간 확인</span>
+      <strong>${escapeHTML(lplanSyncing ? "확인 중" : checkedAtText)}</strong>
     </article>
   `;
+
+  if (lplanBranchSummary) {
+    lplanBranchSummary.innerHTML = branchRows.length
+      ? `
+        <div class="lplan-branch-head">
+          <strong>지점별 학습 데이터</strong>
+          <span>서버에 동기화된 엘플랜 견적 기준입니다.</span>
+        </div>
+        <div class="lplan-branch-chips">
+          ${branchRows.map((item) => `
+            <span>
+              ${escapeHTML(item.branch || "지점 미기록")}
+              <b>${escapeHTML(String(item.count || 0))}건</b>
+            </span>
+          `).join("")}
+        </div>
+      `
+      : `
+        <div class="lplan-branch-head">
+          <strong>지점별 학습 데이터</strong>
+          <span>아직 서버에 동기화된 엘플랜 견적이 없습니다.</span>
+        </div>
+      `;
+  }
 
   if (lplanSyncError && !rows.length) {
     lplanSyncList.innerHTML = `
@@ -1280,12 +1355,12 @@ function renderLplanSyncPanel() {
         <article class="lplan-sync-card">
           <div>
             <strong>${escapeHTML(row.title || row.comboKey || row.sourceQuoteId || "엘플랜 저장 견적")}</strong>
-            <p>${escapeHTML(row.branch || "지점 미기록")} · ${escapeHTML(row.membershipType || "구분 미기록")} · 품목 ${escapeHTML(String(row.itemCount || modelRows.length || 0))}개</p>
+            <p><b>${escapeHTML(row.branch || "지점 미기록")}</b> · ${escapeHTML(row.membershipType || "구분 미기록")} · 품목 ${escapeHTML(String(row.itemCount || modelRows.length || 0))}개</p>
           </div>
           <dl>
+            <div><dt>지점</dt><dd>${escapeHTML(row.branch || "지점 미기록")}</dd></div>
             <div><dt>저장일</dt><dd>${escapeHTML(formatDate(row.sourceSavedAt))}</dd></div>
             <div><dt>동기화</dt><dd>${escapeHTML(formatDate(row.syncedAt))}</dd></div>
-            <div><dt>정상가 합계</dt><dd>${escapeHTML(formatWon(row.totalRegPrice))}</dd></div>
           </dl>
           <p class="lplan-models">${escapeHTML(previewModels.length ? previewModels.join(" · ") : "모델명 미기록")}</p>
         </article>
@@ -1649,6 +1724,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const forceLplanSyncButton = event.target.closest("[data-force-lplan-sync]");
+  if (forceLplanSyncButton) {
+    forceLplanTrainingSync();
+    return;
+  }
+
   const closeModalButton = event.target.closest("[data-close-admin-modal]");
   if (closeModalButton || event.target.classList.contains("admin-modal")) {
     closeAdminModals();
@@ -1698,6 +1779,18 @@ refreshBtn.addEventListener("click", async () => {
   showToast("관리자 데이터를 다시 불러왔습니다.");
 });
 
+async function refreshLplanTrainingQuietly() {
+  if (lplanSyncing || document.hidden) return;
+  const result = await loadLplanTrainingFromServer({ silent: true, limit: 100 });
+  if (!result?.ok || !Array.isArray(result.rows)) return;
+  writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, result.rows);
+  if (result.summary) {
+    localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(result.summary));
+  }
+  renderLplanSyncPanel();
+}
+
+setInterval(refreshLplanTrainingQuietly, 30000);
 
 window.addEventListener("storage", (event) => {
   if (!Object.values(STORAGE_KEYS).includes(event.key)) return;
