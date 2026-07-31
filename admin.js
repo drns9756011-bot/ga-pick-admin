@@ -479,18 +479,18 @@ async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
   const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
   const requestOptions = options.silent ? { silent: true } : {};
-  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
-  if (localTraining?.ok && Array.isArray(localTraining.rows)) {
-    lplanSyncError = "";
-    lplanLastCheckedAt = new Date().toISOString();
-    return localTraining;
-  }
-
   const publicTraining = await apiJson(`${PUBLIC_API_BASE}/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
   if (publicTraining?.ok && Array.isArray(publicTraining.rows)) {
     lplanSyncError = "";
     lplanLastCheckedAt = new Date().toISOString();
     return publicTraining;
+  }
+
+  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
+  if (localTraining?.ok && Array.isArray(localTraining.rows)) {
+    lplanSyncError = "";
+    lplanLastCheckedAt = new Date().toISOString();
+    return localTraining;
   }
 
   lplanSyncError = "엘플랜 동기화 데이터를 불러오지 못했습니다. 엘플랜 저장 API와 관리자 DB 연결을 확인해주세요.";
