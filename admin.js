@@ -439,20 +439,40 @@ async function loadAlimtalkMessagesFromServer() {
 
 async function loadCustomerQuotesFromServer() {
   const timestamp = Date.now();
-  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`);
-  if (localQuotes?.ok && Array.isArray(localQuotes.rows)) {
-    customerQuoteSyncError = "";
-    return localQuotes;
-  }
-
   const publicQuotes = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes?ts=${timestamp}`);
   if (publicQuotes?.ok && Array.isArray(publicQuotes.rows)) {
     customerQuoteSyncError = "";
     return publicQuotes;
   }
 
+  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`);
+  if (localQuotes?.ok && Array.isArray(localQuotes.rows)) {
+    customerQuoteSyncError = "";
+    return localQuotes;
+  }
+
   customerQuoteSyncError = "고객 견적을 서버에서 불러오지 못했습니다. 관리자 API와 노출용 API 연결 상태를 확인해주세요.";
   return null;
+}
+
+async function loadSellerApplicationsFromServer() {
+  const timestamp = Date.now();
+  const publicApplications = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications?ts=${timestamp}`);
+  if (publicApplications?.ok && Array.isArray(publicApplications.rows)) {
+    return publicApplications;
+  }
+
+  return apiJson(`/api/seller-applications?ts=${timestamp}`);
+}
+
+async function loadApprovedSellersFromServer() {
+  const timestamp = Date.now();
+  const publicSellers = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`);
+  if (publicSellers?.ok && Array.isArray(publicSellers.rows)) {
+    return publicSellers;
+  }
+
+  return apiJson(`/api/approved-sellers?ts=${timestamp}`);
 }
 
 async function loadLplanTrainingFromServer(options = {}) {
@@ -498,8 +518,8 @@ async function forceLplanTrainingSync() {
 
 async function loadAdminDataFromServer() {
   const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining] = await Promise.all([
-    apiJson("/api/seller-applications"),
-    apiJson("/api/approved-sellers"),
+    loadSellerApplicationsFromServer(),
+    loadApprovedSellersFromServer(),
     loadAlimtalkMessagesFromServer(),
     loadCustomerQuotesFromServer(),
     apiJson("/api/deleted-quote-logs"),
@@ -535,12 +555,15 @@ async function loadAdminDataFromServer() {
 }
 
 async function syncApplicationStatusToServer(applicationId, status, reviewMemo) {
-  const result = await apiJson(`/api/seller-applications/${encodeURIComponent(applicationId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications/${encodeURIComponent(applicationId)}`, {
     method: "PATCH",
     body: JSON.stringify({ status, reviewMemo }),
   });
 
-  if (!result?.ok) return;
+  if (!result?.ok) {
+    showToast(result?.message || "판매자 신청 상태 변경에 실패했습니다.");
+    return;
+  }
   await loadAdminDataFromServer();
   renderAll();
 }
@@ -619,7 +642,7 @@ function setApprovedSellers(rows) {
 }
 
 async function syncApprovedSellerPasswordToServer(sellerId, password) {
-  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ password }),
   });
@@ -635,7 +658,7 @@ async function syncApprovedSellerPasswordToServer(sellerId, password) {
 }
 
 async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
-  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ managerPosition }),
   });
@@ -654,7 +677,7 @@ async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
 }
 
 async function syncApprovedSellerUpdateToServer(sellerId, payload) {
-  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -671,7 +694,7 @@ async function syncApprovedSellerUpdateToServer(sellerId, payload) {
 }
 
 async function syncApprovedSellerDeleteToServer(sellerId) {
-  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
   });
 
