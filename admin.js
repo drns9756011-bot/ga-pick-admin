@@ -9,6 +9,14 @@
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
+function resolvePublicAssetUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^(data:|https?:|blob:)/i.test(raw)) return raw;
+  if (raw.startsWith("/")) return `${PUBLIC_API_BASE}${raw}`;
+  return `${PUBLIC_API_BASE}/${raw.replace(/^\/+/, "")}`;
+}
+
 let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
@@ -522,7 +530,7 @@ async function loadAdminDataFromServer() {
     loadApprovedSellersFromServer(),
     loadAlimtalkMessagesFromServer(),
     loadCustomerQuotesFromServer(),
-    apiJson("/api/deleted-quote-logs"),
+    loadDeletedQuoteLogsFromServer(),
     loadLplanTrainingFromServer(),
   ]);
 
@@ -552,6 +560,13 @@ async function loadAdminDataFromServer() {
       localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(lplanTraining.summary));
     }
   }
+}
+
+async function loadDeletedQuoteLogsFromServer() {
+  const timestamp = Date.now();
+  const publicLogs = await apiJson(`${PUBLIC_API_BASE}/api/deleted-quote-logs?ts=${timestamp}`, { silent: true });
+  if (publicLogs?.ok && Array.isArray(publicLogs.rows)) return publicLogs;
+  return apiJson(`/api/deleted-quote-logs?ts=${timestamp}`, { silent: true });
 }
 
 async function syncApplicationStatusToServer(applicationId, status, reviewMemo) {
@@ -709,7 +724,7 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
 }
 
 async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
-  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -726,7 +741,7 @@ async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
 }
 
 async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
-  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+  const result = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
     method: "DELETE",
     body: JSON.stringify({ reason }),
   });
@@ -1058,6 +1073,7 @@ function renderApplicationDetail(application) {
   }
 
   const isPending = application.status === "pending";
+  const cardImageUrl = resolvePublicAssetUrl(application.cardImage);
   applicationDetail.innerHTML = `
     <div class="detail-top">
       <div>
@@ -1067,7 +1083,7 @@ function renderApplicationDetail(application) {
       </div>
     </div>
     <div class="card-preview">
-      ${application.cardImage ? `<img src="${application.cardImage}" alt="${escapeHTML(sellerName(application))} 명함 이미지" />` : "<span>등록된 명함 이미지가 없습니다.</span>"}
+      ${cardImageUrl ? `<img src="${escapeHTML(cardImageUrl)}" alt="${escapeHTML(sellerName(application))} 명함 이미지" />` : "<span>등록된 명함 이미지가 없습니다.</span>"}
     </div>
     <dl class="detail-grid">
       <div><dt>판매자 아이디</dt><dd>${escapeHTML(application.sellerId)}</dd></div>
@@ -1263,6 +1279,7 @@ function renderCustomerQuotes() {
     ? quotes.map((quote) => {
       const status = quoteStatusMeta(quote);
       const imagesCount = Number(quote.imagesCount || quote.quoteImageCount || (quote.image ? 1 : 0));
+      const quoteImageUrl = resolvePublicAssetUrl(quote.thumbnailImage || quote.image);
       const quoteTypeLabel = quote.quoteType === "without_quote"
         ? "견적서 없음"
         : quote.quoteType === "with_quote"
@@ -1271,7 +1288,7 @@ function renderCustomerQuotes() {
       return `
         <article class="quote-admin-card">
           <div class="quote-admin-thumb">
-            ${quote.thumbnailImage || quote.image ? `<img src="${escapeHTML(quote.thumbnailImage || quote.image)}" alt="대표 견적 이미지" />` : `<span>이미지 없음</span>`}
+            ${quoteImageUrl ? `<img src="${escapeHTML(quoteImageUrl)}" alt="대표 견적 이미지" />` : `<span>이미지 없음</span>`}
           </div>
           <div class="quote-admin-body">
             <div class="quote-admin-head">
