@@ -6,6 +6,8 @@ const STORAGE_KEYS = {
   deletedQuoteLogs: "pickquoteDeletedQuoteLogs",
   lplanTrainingQuotes: "pickquoteLplanTrainingQuotes",
   visitStats: "pickquoteVisitStats",
+  sellerAccessLogs: "pickquoteSellerAccessLogs",
+  sellerAccessSummary: "pickquoteSellerAccessSummary",
   adminLastRefreshedAt: "pickquoteAdminLastRefreshedAt",
   adminApiToken: "pickquoteAdminApiToken",
 };
@@ -37,6 +39,10 @@ const applicationList = document.querySelector("#applicationList");
 const applicationDetail = document.querySelector("#applicationDetail");
 const applicationSearch = document.querySelector("#applicationSearch");
 const approvedSellerRows = document.querySelector("#approvedSellerRows");
+const sellerAccessRows = document.querySelector("#sellerAccessRows");
+const sellerAccessSummary = document.querySelector("#sellerAccessSummary");
+const sellerAccessSearch = document.querySelector("#sellerAccessSearch");
+const sellerAccessDays = document.querySelector("#sellerAccessDays");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
@@ -88,6 +94,13 @@ const ADMIN_PAGE_CONFIG = {
     copy: "채널, 지점, 매니저, 직책, 비밀번호 초기화와 계정 삭제를 관리합니다.",
     visible: ["statGrid", "adminSecondaryGrid", "approvedSellers"],
   },
+  sellerAccess: {
+    path: "/seller-access",
+    title: "판매자 접속 기록",
+    heading: "판매자 로그인과 접속 기기를 확인하세요.",
+    copy: "성공한 로그인 기록을 날짜, 지점, 매니저, 기기별로 확인합니다.",
+    visible: ["statGrid", "sellerAccessPanel"],
+  },
   alimtalk: {
     path: "/alimtalk",
     title: "알림톡 상태",
@@ -107,6 +120,7 @@ const ADMIN_SECTION_IDS = [
   "applicationDetail",
   "adminSecondaryGrid",
   "approvedSellers",
+  "sellerAccessPanel",
   "alimtalkControl",
 ];
 
@@ -115,6 +129,7 @@ function adminPageKeyFromPath(pathname) {
   if (normalized === "/customers") return "customers";
   if (normalized === "/sellers") return "sellers";
   if (normalized === "/approved-sellers") return "approvedSellers";
+  if (normalized === "/seller-access") return "sellerAccess";
   if (normalized === "/alimtalk") return "alimtalk";
   return "dashboard";
 }
@@ -529,6 +544,15 @@ async function loadVisitStatsFromServer(options = {}) {
   return apiJson(`/api/visit-stats?ts=${timestamp}`, requestOptions);
 }
 
+async function loadSellerAccessLogsFromServer(options = {}) {
+  const timestamp = Date.now();
+  const days = Math.min(365, Math.max(1, Number(options.days || sellerAccessDays?.value || 30) || 30));
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicLogs = await apiJson(`${PUBLIC_API_BASE}/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
+  if (publicLogs?.ok && Array.isArray(publicLogs.rows)) return publicLogs;
+  return apiJson(`/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
+}
+
 async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
   const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
@@ -582,7 +606,7 @@ async function loadAdminDataFromServer(options = {}) {
   }
   try {
     const requestOptions = { silent: true };
-    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats] = await Promise.all([
+    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = await Promise.all([
       loadSellerApplicationsFromServer(requestOptions),
       loadApprovedSellersFromServer(requestOptions),
       loadAlimtalkMessagesFromServer(requestOptions),
@@ -590,6 +614,7 @@ async function loadAdminDataFromServer(options = {}) {
       apiJson("/api/deleted-quote-logs", requestOptions),
       loadLplanTrainingFromServer({ silent: true, limit: 100 }),
       loadVisitStatsFromServer(requestOptions),
+      loadSellerAccessLogsFromServer({ silent: true }),
     ]);
 
     if (applications?.ok && Array.isArray(applications.rows)) writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
@@ -598,6 +623,10 @@ async function loadAdminDataFromServer(options = {}) {
     if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
     if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
     if (visitStats?.ok) localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+    if (sellerAccess?.ok && Array.isArray(sellerAccess.rows)) {
+      writeStorageArray(STORAGE_KEYS.sellerAccessLogs, sellerAccess.rows);
+      localStorage.setItem(STORAGE_KEYS.sellerAccessSummary, JSON.stringify(sellerAccess.summary || {}));
+    }
     if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
       writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, lplanTraining.rows);
       if (lplanTraining.summary) {
@@ -1050,6 +1079,49 @@ function summarizeCustomerQuotes(quotes) {
   });
 }
 
+function getSellerAccessLogs() {
+  return readStorageArray(STORAGE_KEYS.sellerAccessLogs);
+}
+
+function getSellerAccessSummary() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.sellerAccessSummary) || "{}") || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function renderSellerAccessLogs() {
+  if (!sellerAccessRows || !sellerAccessSummary) return;
+  const summary = getSellerAccessSummary();
+  const search = String(sellerAccessSearch?.value || "").trim().toLowerCase();
+  const rows = getSellerAccessLogs().filter((row) => {
+    if (!search) return true;
+    return [row.sellerId, row.channel, row.branch, row.manager, row.deviceType, row.browserName]
+      .some((value) => String(value || "").toLowerCase().includes(search));
+  });
+
+  sellerAccessSummary.innerHTML = [
+    ["오늘 접속 판매자", `${Number(summary.today?.sellerCount || 0).toLocaleString("ko-KR")}명`],
+    ["오늘 로그인", `${Number(summary.today?.loginCount || 0).toLocaleString("ko-KR")}회`],
+    ["최근 7일 접속", `${Number(summary.last7Days?.sellerCount || 0).toLocaleString("ko-KR")}명`],
+    ["누적 로그인", `${Number(summary.total?.loginCount || 0).toLocaleString("ko-KR")}회`],
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("");
+
+  sellerAccessRows.innerHTML = rows.length
+    ? rows.map((row) => `
+      <tr>
+        <td><strong>${escapeHTML(formatDate(row.accessedAt))}</strong></td>
+        <td>${escapeHTML(row.channel || "-")}</td>
+        <td>${escapeHTML(row.branch || "-")}</td>
+        <td>${escapeHTML([row.manager, row.managerPosition].filter(Boolean).join(" ") || "-")}</td>
+        <td><code>${escapeHTML(row.sellerId || "-")}</code></td>
+        <td>${escapeHTML([row.deviceType, row.browserName].filter(Boolean).join(" · ") || "-")}</td>
+        <td>${escapeHTML(row.ipMasked || "확인 불가")}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="7" class="empty-table-cell">조건에 해당하는 판매자 접속 기록이 없습니다.</td></tr>`;
+}
+
 function renderStats() {
   const applications = getApplications();
   const approved = getApprovedSellers();
@@ -1065,6 +1137,10 @@ function renderStats() {
   const todayViews = Number(visitStats.today?.pageViews || 0);
   const sevenDayVisitors = Number(visitStats.last7Days?.uniqueVisitors || 0);
   const totalViews = Number(visitStats.total?.pageViews || 0);
+  const sellerAccessStats = getSellerAccessSummary();
+  const todaySellerAccess = Number(sellerAccessStats.today?.sellerCount || 0);
+  const todaySellerLogins = Number(sellerAccessStats.today?.loginCount || 0);
+  const weekSellerAccess = Number(sellerAccessStats.last7Days?.sellerCount || 0);
 
   statGrid.innerHTML = [
     {
@@ -1082,6 +1158,7 @@ function renderStats() {
     },
     { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
     { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 판매자 계정", action: "approved-sellers" },
+    { label: "판매자 접속", value: `오늘 ${todaySellerAccess}명`, note: `오늘 로그인 ${todaySellerLogins}회 · 최근 7일 ${weekSellerAccess}명`, action: "seller-access" },
     { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
@@ -1750,6 +1827,11 @@ function openStatAction(action) {
     return;
   }
 
+  if (action === "seller-access") {
+    navigateAdminPage("sellerAccess");
+    return;
+  }
+
   if (action === "ready-messages") {
     messageFilter = "all";
     navigateAdminPage("alimtalk");
@@ -1769,6 +1851,7 @@ function renderAll() {
   renderCustomerQuotes();
   renderApplications();
   renderApprovedSellers();
+  renderSellerAccessLogs();
   renderMessages();
   applyAdminPageView();
   startAdminQuoteCountdownTimer();
@@ -1948,6 +2031,25 @@ window.addEventListener("popstate", () => {
 applicationSearch.addEventListener("input", () => {
   selectedApplicationId = "";
   renderApplications();
+});
+
+sellerAccessSearch?.addEventListener("input", renderSellerAccessLogs);
+sellerAccessDays?.addEventListener("change", async () => {
+  const token = await requestAdminApiToken();
+  if (!token) return;
+  setAdminLoading(true, "판매자 접속 기록을 불러오는 중입니다.", "선택한 기간의 로그인 기록을 확인하고 있습니다.");
+  try {
+    const result = await loadSellerAccessLogsFromServer({ silent: true, days: sellerAccessDays.value });
+    if (result?.ok && Array.isArray(result.rows)) {
+      writeStorageArray(STORAGE_KEYS.sellerAccessLogs, result.rows);
+      localStorage.setItem(STORAGE_KEYS.sellerAccessSummary, JSON.stringify(result.summary || {}));
+      renderAll();
+    } else {
+      showToast(result?.message || "판매자 접속 기록을 불러오지 못했습니다.");
+    }
+  } finally {
+    setAdminLoading(false);
+  }
 });
 
 refreshBtn.addEventListener("click", async () => {

@@ -2093,3 +2093,106 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
   color: #b91c1c;
   font-weight: 800;
 }
+
+
+/* 2026-08-04 seller access log */
+.seller-access-panel {
+  display: grid;
+  gap: 20px;
+}
+.seller-access-head {
+  align-items: end;
+  gap: 20px;
+}
+.seller-access-tools {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.seller-access-tools label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.seller-access-tools select,
+.seller-access-tools input {
+  min-width: 170px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.seller-access-tools input { min-width: 260px; }
+.seller-access-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.seller-access-summary article {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fafb;
+}
+.seller-access-summary span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.seller-access-summary strong { font-size: 23px; }
+.seller-access-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.seller-access-table-wrap table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: collapse;
+}
+.seller-access-table-wrap th,
+.seller-access-table-wrap td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.seller-access-table-wrap th {
+  background: #f4f7f8;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+.seller-access-table-wrap td { font-size: 14px; }
+.seller-access-table-wrap tbody tr:last-child td { border-bottom: 0; }
+.seller-access-table-wrap code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+.empty-table-cell {
+  padding: 38px !important;
+  color: var(--muted);
+  text-align: center !important;
+}
+body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
+@media (max-width: 900px) {
+  .seller-access-head { align-items: stretch; }
+  .seller-access-tools { display: grid; grid-template-columns: 1fr; }
+  .seller-access-tools select,
+  .seller-access-tools input { width: 100%; min-width: 0; }
+  .seller-access-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .seller-access-summary { grid-template-columns: 1fr; }
+}
+.seller-access-panel[hidden] { display: none !important; }
