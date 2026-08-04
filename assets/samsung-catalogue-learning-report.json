@@ -1,0 +1,142 @@
+{
+  "sourceFile": "C:\\Users\\LG\\Downloads\\dp_20260708.pdf",
+  "pages": 72,
+  "totalUniqueModels": 526,
+  "productCounts": {
+    "TV": 98,
+    "라이프스타일 TV": 6,
+    "냉장고": 52,
+    "김치냉장고": 25,
+    "세탁기/건조기": 36,
+    "의류관리기": 8,
+    "에어컨": 257,
+    "청소기": 26,
+    "식기세척기": 15,
+    "공기청정기": 3
+  },
+  "examples": {
+    "TV": [
+      "MNA114MS1CCXKR",
+      "MNA101MS1BCXKR",
+      "MNA89MS1BACXKR",
+      "KQ85QNH990FXKR",
+      "KMR115MRF95XKR",
+      "KMR85RH95AFXKR",
+      "KMR75RH95AFXKR",
+      "KMR65RH95AFXKR",
+      "KMR85RH9GAFXKR",
+      "KMR75RH9GAFXKR",
+      "KMR65RH9GAFXKR",
+      "KMR100RH85FXKR"
+    ],
+    "라이프스타일 TV": [
+      "SP-LPDU9SAXXKR",
+      "SP-LPDU7SAXXKR",
+      "SP-LPDF5SAXXKR",
+      "SP-LFCF3LAXXKR",
+      "LSH03W",
+      "LSH03E",
+      "LSH03W",
+      "LSH03E"
+    ],
+    "냉장고": [
+      "RF60DB9KF2AP",
+      "RM90F91D1",
+      "RM90F64E2",
+      "RM80F91H1",
+      "RM80F91L1",
+      "RM80F64L2",
+      "RM70F64Q1",
+      "RS84T50",
+      "RS84T5080M9",
+      "RS82M6000SA",
+      "RR40C7985AP",
+      "RR40C7885AP"
+    ],
+    "김치냉장고": [
+      "RK80F49C1XJ",
+      "RK80F49C1XJ",
+      "RK80F49C1XJ",
+      "RK80F49C1XJ",
+      "RQ34C8945APG",
+      "RQ38C9991APG",
+      "RQ33HB7411A",
+      "RQ33DB7441AP",
+      "RQ33DB7411AP",
+      "RQ33DB74B1AP",
+      "RQ33DB74B1EW",
+      "RK80F42C2W"
+    ],
+    "식기세척기": [
+      "DW30FB305",
+      "DW30FB300",
+      "DW30FB305",
+      "DW30CB305",
+      "DW30CB30",
+      "DW30FB30",
+      "DW99F79E1UAP",
+      "DW60BB837UAP",
+      "DW90F79P1UAP",
+      "DW90F79P1U01",
+      "DW80F73Y1FEW",
+      "DW99F79E1UAP"
+    ],
+    "세탁기/건조기": [
+      "WD90H25AH",
+      "WA8700",
+      "WD99F25AHR",
+      "WD90H25AHS",
+      "WD90H25AHY",
+      "WD90H25AHT",
+      "WF2420HCVVC",
+      "WF2420HCWWC",
+      "WD90H25BHY",
+      "WD90H25BHW",
+      "WD80H25BHS",
+      "WD90H25AHW"
+    ],
+    "의류관리기": [
+      "DF90H24R4",
+      "DF90H24R5C",
+      "DF90H24R4D",
+      "DF90H24R4B",
+      "DF90H24R4P",
+      "DF80H24R1D",
+      "DF80H24R1B",
+      "DF24CB9600ER"
+    ],
+    "에어컨": [
+      "AF90H19D35EN",
+      "AF80F19D24SR",
+      "AF90H19D35EN",
+      "AF90H19D35EN",
+      "AF90H25D36WR",
+      "AF90H25D36WR",
+      "AF25N9970RFR",
+      "AF90H19D35EN",
+      "AF90H19D35EN",
+      "AF80F25D29WR",
+      "AF70F19D25WN",
+      "AF19B7934"
+    ],
+    "공기청정기": [
+      "AX100DB99",
+      "AX100DB990",
+      "AX100DB9"
+    ],
+    "청소기": [
+      "VS28D95",
+      "VS20B95",
+      "VS20B95",
+      "VS90F40CSG",
+      "VS90F40CSK",
+      "VS70H18GVG",
+      "VS70H18GVK",
+      "VS70H18GXG",
+      "VS70H18GXK",
+      "VS28D952HCB",
+      "VS28D952HCA",
+      "VS28D952DCB"
+    ]
+  }
+}
