@@ -8448,3 +8448,8 @@ html.is-mobile-device .header-ad-slot.is-image-banner img {
     word-break: keep-all;
   }
 }
+
+
+[data-quote-countdown] {
+  font-variant-numeric: tabular-nums;
+}
