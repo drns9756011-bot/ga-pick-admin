@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #eef2f5;
   --panel: #ffffff;
   --ink: #14212d;
@@ -2027,6 +2027,58 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
 
   .quote-bid-row em {
     justify-self: start;
+  }
+}
+
+/* 2026-08-04 visitor stats and single-load navigation */
+.admin-actions {
+  align-items: center;
+}
+
+.admin-last-updated {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.visitor-summary-card {
+  border-color: rgba(18, 107, 93, 0.26);
+  background: linear-gradient(145deg, rgba(18, 107, 93, 0.08), #fff 58%);
+}
+
+.visitor-summary-card p {
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+@media (min-width: 1221px) {
+  .visitor-summary-card {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .admin-last-updated {
+    text-align: center;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .visitor-summary-card {
+    grid-column: auto;
   }
 }
 

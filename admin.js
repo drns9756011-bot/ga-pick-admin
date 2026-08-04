@@ -1,21 +1,15 @@
-﻿const STORAGE_KEYS = {
+const STORAGE_KEYS = {
   sellerApplications: "pickquoteSellerApplications",
   approvedSellers: "pickquoteApprovedSellers",
   alimtalkQueue: "pickquoteAlimtalkQueue",
   customerQuotes: "pickquoteCustomerQuotes",
   deletedQuoteLogs: "pickquoteDeletedQuoteLogs",
   lplanTrainingQuotes: "pickquoteLplanTrainingQuotes",
+  visitStats: "pickquoteVisitStats",
+  adminLastRefreshedAt: "pickquoteAdminLastRefreshedAt",
   adminApiToken: "pickquoteAdminApiToken",
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
-
-function resolvePublicAssetUrl(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  if (/^(data:|https?:|blob:)/i.test(raw)) return raw;
-  if (raw.startsWith("/")) return `${PUBLIC_API_BASE}${raw}`;
-  return `${PUBLIC_API_BASE}/${raw.replace(/^\/+/, "")}`;
-}
 
 let applicationFilter = "pending";
 let messageFilter = "all";
@@ -44,6 +38,11 @@ const approvedSellerRows = document.querySelector("#approvedSellerRows");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
+const adminActions = document.querySelector(".admin-actions");
+const adminLastUpdated = document.createElement("span");
+adminLastUpdated.className = "admin-last-updated";
+adminLastUpdated.setAttribute("aria-live", "polite");
+refreshBtn?.insertAdjacentElement("beforebegin", adminLastUpdated);
 const adminShell = document.querySelector(".admin-shell");
 const adminHeaderTitle = document.querySelector(".admin-header h1");
 const adminHeaderCopy = document.querySelector(".header-copy");
@@ -109,13 +108,29 @@ const ADMIN_SECTION_IDS = [
   "alimtalkControl",
 ];
 
-function getCurrentAdminPageKey() {
-  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
-  if (pathname === "/customers") return "customers";
-  if (pathname === "/sellers") return "sellers";
-  if (pathname === "/approved-sellers") return "approvedSellers";
-  if (pathname === "/alimtalk") return "alimtalk";
+function adminPageKeyFromPath(pathname) {
+  const normalized = String(pathname || "/").replace(/\/+$/, "") || "/";
+  if (normalized === "/customers") return "customers";
+  if (normalized === "/sellers") return "sellers";
+  if (normalized === "/approved-sellers") return "approvedSellers";
+  if (normalized === "/alimtalk") return "alimtalk";
   return "dashboard";
+}
+
+function updateLastRefreshedDisplay(value = "") {
+  const timestamp = value || localStorage.getItem(STORAGE_KEYS.adminLastRefreshedAt) || "";
+  if (!timestamp) {
+    adminLastUpdated.textContent = "최초 데이터 확인 전";
+    return;
+  }
+  const date = new Date(timestamp);
+  adminLastUpdated.textContent = Number.isNaN(date.getTime())
+    ? "갱신 시간 확인 불가"
+    : `마지막 갱신 ${date.toLocaleString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function getCurrentAdminPageKey() {
+  return adminPageKeyFromPath(window.location.pathname);
 }
 
 function setAdminLoading(isVisible, title = "서버와 연결 중입니다.", text = "잠시만 기다려주세요.") {
@@ -135,9 +150,14 @@ function setAdminLoading(isVisible, title = "서버와 연결 중입니다.", te
   document.body.classList.remove("is-admin-loading");
 }
 
-function navigateAdminPage(pageKey) {
+function navigateAdminPage(pageKey, options = {}) {
   const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
-  window.location.href = config.path;
+  if (window.location.pathname !== config.path) {
+    const historyMethod = options.replace ? "replaceState" : "pushState";
+    window.history[historyMethod]({ adminPage: pageKey }, "", config.path);
+  }
+  renderAll();
+  if (!options.keepScroll) window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 function applyAdminPageView() {
@@ -366,21 +386,33 @@ function openAdminTextModal(options = {}) {
   });
 }
 
+let adminTokenRequestPromise = null;
+
 async function requestAdminApiToken() {
   const current = readAdminApiToken();
   if (current) return current;
-  const next = await openAdminTextModal({
-    eyebrow: "Admin Token",
-    title: "관리자 인증 토큰 입력",
-    description: "관리자 데이터 조회와 저장을 위해 발급받은 API 토큰을 입력해주세요.",
-    label: "관리자 API 토큰",
-    inputType: "password",
-    confirmText: "토큰 저장",
-  });
-  if (!next) return "";
-  const token = next.trim();
-  localStorage.setItem(STORAGE_KEYS.adminApiToken, token);
-  return token;
+  if (adminTokenRequestPromise) return adminTokenRequestPromise;
+
+  adminTokenRequestPromise = (async () => {
+    const next = await openAdminTextModal({
+      eyebrow: "Admin Token",
+      title: "관리자 인증 토큰 입력",
+      description: "관리자 데이터 조회와 저장을 위해 발급받은 API 토큰을 입력해주세요.",
+      label: "관리자 API 토큰",
+      inputType: "password",
+      confirmText: "토큰 저장",
+    });
+    if (!next) return "";
+    const token = next.trim();
+    localStorage.setItem(STORAGE_KEYS.adminApiToken, token);
+    return token;
+  })();
+
+  try {
+    return await adminTokenRequestPromise;
+  } finally {
+    adminTokenRequestPromise = null;
+  }
 }
 
 async function apiJson(path, options = {}) {
@@ -427,15 +459,16 @@ async function apiJson(path, options = {}) {
   }
 }
 
-async function loadAlimtalkMessagesFromServer() {
+async function loadAlimtalkMessagesFromServer(options = {}) {
   const timestamp = Date.now();
-  const publicMessages = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk?ts=${timestamp}`);
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicMessages = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk?ts=${timestamp}`, requestOptions);
   if (publicMessages?.ok && Array.isArray(publicMessages.rows)) {
     messageSyncError = "";
     return publicMessages;
   }
 
-  const localMessages = await apiJson(`/api/alimtalk?ts=${timestamp}`);
+  const localMessages = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
   if (localMessages?.ok && Array.isArray(localMessages.rows)) {
     messageSyncError = "";
     return localMessages;
@@ -445,15 +478,16 @@ async function loadAlimtalkMessagesFromServer() {
   return null;
 }
 
-async function loadCustomerQuotesFromServer() {
+async function loadCustomerQuotesFromServer(options = {}) {
   const timestamp = Date.now();
-  const publicQuotes = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes?ts=${timestamp}`);
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicQuotes = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes?ts=${timestamp}`, requestOptions);
   if (publicQuotes?.ok && Array.isArray(publicQuotes.rows)) {
     customerQuoteSyncError = "";
     return publicQuotes;
   }
 
-  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`);
+  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`, requestOptions);
   if (localQuotes?.ok && Array.isArray(localQuotes.rows)) {
     customerQuoteSyncError = "";
     return localQuotes;
@@ -463,24 +497,34 @@ async function loadCustomerQuotesFromServer() {
   return null;
 }
 
-async function loadSellerApplicationsFromServer() {
+async function loadSellerApplicationsFromServer(options = {}) {
   const timestamp = Date.now();
-  const publicApplications = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications?ts=${timestamp}`);
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicApplications = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications?ts=${timestamp}`, requestOptions);
   if (publicApplications?.ok && Array.isArray(publicApplications.rows)) {
     return publicApplications;
   }
 
-  return apiJson(`/api/seller-applications?ts=${timestamp}`);
+  return apiJson(`/api/seller-applications?ts=${timestamp}`, requestOptions);
 }
 
-async function loadApprovedSellersFromServer() {
+async function loadApprovedSellersFromServer(options = {}) {
   const timestamp = Date.now();
-  const publicSellers = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`);
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicSellers = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`, requestOptions);
   if (publicSellers?.ok && Array.isArray(publicSellers.rows)) {
     return publicSellers;
   }
 
-  return apiJson(`/api/approved-sellers?ts=${timestamp}`);
+  return apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions);
+}
+
+async function loadVisitStatsFromServer(options = {}) {
+  const timestamp = Date.now();
+  const requestOptions = options.silent ? { silent: true } : {};
+  const publicStats = await apiJson(`${PUBLIC_API_BASE}/api/visit-stats?ts=${timestamp}`, requestOptions);
+  if (publicStats?.ok) return publicStats;
+  return apiJson(`/api/visit-stats?ts=${timestamp}`, requestOptions);
 }
 
 async function loadLplanTrainingFromServer(options = {}) {
@@ -524,49 +568,47 @@ async function forceLplanTrainingSync() {
   renderAll();
 }
 
-async function loadAdminDataFromServer() {
-  const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining] = await Promise.all([
-    loadSellerApplicationsFromServer(),
-    loadApprovedSellersFromServer(),
-    loadAlimtalkMessagesFromServer(),
-    loadCustomerQuotesFromServer(),
-    loadDeletedQuoteLogsFromServer(),
-    loadLplanTrainingFromServer(),
-  ]);
-
-  if (applications?.ok && Array.isArray(applications.rows)) {
-    writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
+async function loadAdminDataFromServer(options = {}) {
+  const silent = Boolean(options.silent);
+  const token = await requestAdminApiToken();
+  if (!token) {
+    updateLastRefreshedDisplay();
+    return;
   }
-
-  if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) {
-    writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
+  if (!silent) {
+    setAdminLoading(true, "관리자 데이터를 한 번에 불러오는 중입니다.", "최신 운영 정보와 방문자 통계를 확인하고 있습니다.");
   }
+  try {
+    const requestOptions = { silent: true };
+    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats] = await Promise.all([
+      loadSellerApplicationsFromServer(requestOptions),
+      loadApprovedSellersFromServer(requestOptions),
+      loadAlimtalkMessagesFromServer(requestOptions),
+      loadCustomerQuotesFromServer(requestOptions),
+      apiJson("/api/deleted-quote-logs", requestOptions),
+      loadLplanTrainingFromServer({ silent: true, limit: 100 }),
+      loadVisitStatsFromServer(requestOptions),
+    ]);
 
-  if (messages?.ok && Array.isArray(messages.rows)) {
-    writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
-  }
-
-  if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
-    writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
-  }
-
-  if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) {
-    writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
-  }
-
-  if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
-    writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, lplanTraining.rows);
-    if (lplanTraining.summary) {
-      localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(lplanTraining.summary));
+    if (applications?.ok && Array.isArray(applications.rows)) writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
+    if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
+    if (messages?.ok && Array.isArray(messages.rows)) writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
+    if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
+    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
+    if (visitStats?.ok) localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+    if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
+      writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, lplanTraining.rows);
+      if (lplanTraining.summary) {
+        localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(lplanTraining.summary));
+      }
     }
-  }
-}
 
-async function loadDeletedQuoteLogsFromServer() {
-  const timestamp = Date.now();
-  const publicLogs = await apiJson(`${PUBLIC_API_BASE}/api/deleted-quote-logs?ts=${timestamp}`, { silent: true });
-  if (publicLogs?.ok && Array.isArray(publicLogs.rows)) return publicLogs;
-  return apiJson(`/api/deleted-quote-logs?ts=${timestamp}`, { silent: true });
+    const refreshedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
+    updateLastRefreshedDisplay(refreshedAt);
+  } finally {
+    if (!silent) setAdminLoading(false);
+  }
 }
 
 async function syncApplicationStatusToServer(applicationId, status, reviewMemo) {
@@ -724,7 +766,7 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
 }
 
 async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -741,7 +783,7 @@ async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
 }
 
 async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
     method: "DELETE",
     body: JSON.stringify({ reason }),
   });
@@ -774,6 +816,14 @@ function getDeletedQuoteLogs() {
 
 function getLplanTrainingQuotes() {
   return readStorageArray(STORAGE_KEYS.lplanTrainingQuotes);
+}
+
+function getVisitStats() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.visitStats) || "null") || {};
+  } catch (error) {
+    return {};
+  }
 }
 
 function getLplanTrainingSummary() {
@@ -1008,8 +1058,19 @@ function renderStats() {
   const readyMessages = messages.filter((row) => row.status === "ready" || row.status === "sending" || row.status === "accepted").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
+  const visitStats = getVisitStats();
+  const todayVisitors = Number(visitStats.today?.uniqueVisitors || 0);
+  const todayViews = Number(visitStats.today?.pageViews || 0);
+  const sevenDayVisitors = Number(visitStats.last7Days?.uniqueVisitors || 0);
+  const totalViews = Number(visitStats.total?.pageViews || 0);
 
   statGrid.innerHTML = [
+    {
+      label: "노출용 방문자",
+      value: `오늘 ${todayVisitors.toLocaleString("ko-KR")}명`,
+      note: `오늘 조회 ${todayViews.toLocaleString("ko-KR")}회 · 최근 7일 ${sevenDayVisitors.toLocaleString("ko-KR")}명 · 누적 조회 ${totalViews.toLocaleString("ko-KR")}회`,
+      className: "visitor-summary-card",
+    },
     {
       label: "고객 견적",
       value: `누적 ${quoteSummary.total}건`,
@@ -1022,13 +1083,18 @@ function renderStats() {
     { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
   ]
-    .map((stat) => `
-      <article class="stat-card stat-action ${stat.className || ""}" data-stat-action="${stat.action}" role="button" tabindex="0">
-        <span>${stat.label}</span>
-        <strong>${stat.value}</strong>
-        <p>${stat.note}</p>
-      </article>
-    `)
+    .map((stat) => {
+      const interactive = Boolean(stat.action);
+      return `
+        <article class="stat-card${interactive ? " stat-action" : ""} ${stat.className || ""}"${
+          interactive ? ` data-stat-action="${stat.action}" role="button" tabindex="0"` : ""
+        }>
+          <span>${stat.label}</span>
+          <strong>${stat.value}</strong>
+          <p>${stat.note}</p>
+        </article>
+      `;
+    })
     .join("");
 }
 
@@ -1073,7 +1139,6 @@ function renderApplicationDetail(application) {
   }
 
   const isPending = application.status === "pending";
-  const cardImageUrl = resolvePublicAssetUrl(application.cardImage);
   applicationDetail.innerHTML = `
     <div class="detail-top">
       <div>
@@ -1083,7 +1148,7 @@ function renderApplicationDetail(application) {
       </div>
     </div>
     <div class="card-preview">
-      ${cardImageUrl ? `<img src="${escapeHTML(cardImageUrl)}" alt="${escapeHTML(sellerName(application))} 명함 이미지" />` : "<span>등록된 명함 이미지가 없습니다.</span>"}
+      ${application.cardImage ? `<img src="${application.cardImage}" alt="${escapeHTML(sellerName(application))} 명함 이미지" />` : "<span>등록된 명함 이미지가 없습니다.</span>"}
     </div>
     <dl class="detail-grid">
       <div><dt>판매자 아이디</dt><dd>${escapeHTML(application.sellerId)}</dd></div>
@@ -1279,7 +1344,6 @@ function renderCustomerQuotes() {
     ? quotes.map((quote) => {
       const status = quoteStatusMeta(quote);
       const imagesCount = Number(quote.imagesCount || quote.quoteImageCount || (quote.image ? 1 : 0));
-      const quoteImageUrl = resolvePublicAssetUrl(quote.thumbnailImage || quote.image);
       const quoteTypeLabel = quote.quoteType === "without_quote"
         ? "견적서 없음"
         : quote.quoteType === "with_quote"
@@ -1288,7 +1352,7 @@ function renderCustomerQuotes() {
       return `
         <article class="quote-admin-card">
           <div class="quote-admin-thumb">
-            ${quoteImageUrl ? `<img src="${escapeHTML(quoteImageUrl)}" alt="대표 견적 이미지" />` : `<span>이미지 없음</span>`}
+            ${quote.thumbnailImage || quote.image ? `<img src="${escapeHTML(quote.thumbnailImage || quote.image)}" alt="대표 견적 이미지" />` : `<span>이미지 없음</span>`}
           </div>
           <div class="quote-admin-body">
             <div class="quote-admin-head">
@@ -1808,29 +1872,38 @@ document.addEventListener("keydown", (event) => {
   openStatAction(statAction.dataset.statAction);
 });
 
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-admin-nav], .dashboard-link-card");
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const url = new URL(link.href, window.location.href);
+  if (url.origin !== window.location.origin) return;
+  event.preventDefault();
+  navigateAdminPage(link.dataset.adminNav || adminPageKeyFromPath(url.pathname));
+});
+
+window.addEventListener("popstate", () => {
+  renderAll();
+  window.scrollTo({ top: 0, behavior: "auto" });
+});
+
 applicationSearch.addEventListener("input", () => {
   selectedApplicationId = "";
   renderApplications();
 });
 
 refreshBtn.addEventListener("click", async () => {
-  await loadAdminDataFromServer();
-  renderAll();
-  showToast("관리자 데이터를 다시 불러왔습니다.");
+  refreshBtn.disabled = true;
+  refreshBtn.textContent = "갱신 중";
+  try {
+    await loadAdminDataFromServer();
+    renderAll();
+    showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = "새로고침";
+  }
 });
 
-async function refreshLplanTrainingQuietly() {
-  if (lplanSyncing || document.hidden) return;
-  const result = await loadLplanTrainingFromServer({ silent: true, limit: 100 });
-  if (!result?.ok || !Array.isArray(result.rows)) return;
-  writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, result.rows);
-  if (result.summary) {
-    localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(result.summary));
-  }
-  renderLplanSyncPanel();
-}
-
-setInterval(refreshLplanTrainingQuietly, 30000);
 
 window.addEventListener("storage", (event) => {
   if (!Object.values(STORAGE_KEYS).includes(event.key)) return;
@@ -1843,6 +1916,8 @@ if (initialApplicationIdFromUrl) {
   applicationFilter = "all";
 }
 
+updateLastRefreshedDisplay();
+renderAll();
 loadAdminDataFromServer().finally(renderAll);
 
 

@@ -1,4 +1,4 @@
-﻿const jsonHeaders = {
+const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -1147,6 +1147,101 @@ async function uploadFile(env, request) {
   return json({ ok: true, key: saved.key, url: saved.url });
 }
 
+
+let siteVisitTablesReady = false;
+
+async function ensureSiteVisitTables(env) {
+  if (siteVisitTablesReady) return;
+  await env.DB.batch([
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS site_visit_daily (
+        visit_date TEXT PRIMARY KEY,
+        page_views INTEGER NOT NULL DEFAULT 0,
+        unique_visitors INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      )`
+    ),
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS site_visit_uniques (
+        visit_date TEXT NOT NULL,
+        visitor_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (visit_date, visitor_hash)
+      )`
+    ),
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS site_visit_events (
+        event_key TEXT PRIMARY KEY,
+        visit_date TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`
+    ),
+  ]);
+  siteVisitTablesReady = true;
+}
+
+function adminTodayKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function adminDateKeyDaysAgo(days) {
+  const [year, month, day] = adminTodayKey().split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() - Number(days || 0));
+  return value.toISOString().slice(0, 10);
+}
+
+async function getSiteVisitStats(env) {
+  await ensureSiteVisitTables(env);
+  const today = adminTodayKey();
+  const sevenDaysAgo = adminDateKeyDaysAgo(6);
+  const [todayRow, sevenDayRow, totalRow, dailyRows] = await Promise.all([
+    env.DB.prepare(`SELECT page_views, unique_visitors FROM site_visit_daily WHERE visit_date = ?`).bind(today).first(),
+    env.DB.prepare(
+      `SELECT COALESCE(SUM(page_views), 0) AS page_views,
+              COALESCE(SUM(unique_visitors), 0) AS unique_visitors
+         FROM site_visit_daily WHERE visit_date >= ? AND visit_date <= ?`
+    ).bind(sevenDaysAgo, today).first(),
+    env.DB.prepare(
+      `SELECT COALESCE(SUM(page_views), 0) AS page_views,
+              COALESCE(SUM(unique_visitors), 0) AS unique_visitors
+         FROM site_visit_daily`
+    ).first(),
+    env.DB.prepare(
+      `SELECT visit_date, page_views, unique_visitors FROM site_visit_daily
+       ORDER BY visit_date DESC LIMIT 14`
+    ).all(),
+  ]);
+  return json({
+    ok: true,
+    today: {
+      date: today,
+      pageViews: Number(todayRow?.page_views || 0),
+      uniqueVisitors: Number(todayRow?.unique_visitors || 0),
+    },
+    last7Days: {
+      from: sevenDaysAgo,
+      to: today,
+      pageViews: Number(sevenDayRow?.page_views || 0),
+      uniqueVisitors: Number(sevenDayRow?.unique_visitors || 0),
+    },
+    total: {
+      pageViews: Number(totalRow?.page_views || 0),
+      dailyUniqueVisitors: Number(totalRow?.unique_visitors || 0),
+    },
+    daily: (dailyRows?.results || []).map((row) => ({
+      date: row.visit_date,
+      pageViews: Number(row.page_views || 0),
+      uniqueVisitors: Number(row.unique_visitors || 0),
+    })),
+  });
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
   const pathParts = Array.isArray(params.path) ? params.path : [];
@@ -1161,6 +1256,7 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
+  if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
