@@ -1,9 +1,6 @@
-﻿name = "ga-pick-public"
+﻿name = "ga-pick-admin"
 main = "src/index.js"
 compatibility_date = "2026-07-17"
-
-[triggers]
-crons = ["0 */6 * * *"]
 
 [vars]
 SOLAPI_CHANNEL_ID = "KA01PF260720091629575EzVmd2YRyU7"

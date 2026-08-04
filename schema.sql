@@ -76,26 +76,14 @@ CREATE TABLE IF NOT EXISTS customer_quotes (
   customer TEXT NOT NULL,
   phone TEXT NOT NULL,
   items TEXT NOT NULL,
-  quote_type TEXT DEFAULT '',
   purchase_purpose TEXT DEFAULT '',
   desired_brand TEXT DEFAULT '',
   price INTEGER DEFAULT 0,
   region TEXT DEFAULT '',
-  install_date TEXT DEFAULT '',
   memo TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
   selected_bid_id TEXT DEFAULT '',
-  contact_release_scope TEXT DEFAULT 'selected',
-  contact_released_bid_ids TEXT DEFAULT '[]',
-  submission_count INTEGER DEFAULT 1,
-  previous_lowest_price INTEGER DEFAULT 0,
-  rank_notice_queued_at TEXT DEFAULT '',
   sale_completed_at TEXT DEFAULT '',
-  thumbnail_image TEXT DEFAULT '',
-  thumbnail_image_key TEXT DEFAULT '',
-  quote_expires_at TEXT DEFAULT '',
-  full_images_expires_at TEXT DEFAULT '',
-  personal_expires_at TEXT DEFAULT '',
   created_at TEXT NOT NULL,
   consent_json TEXT DEFAULT '{}'
 );
@@ -108,9 +96,7 @@ CREATE TABLE IF NOT EXISTS quote_images (
   quote_id TEXT NOT NULL,
   object_key TEXT NOT NULL,
   url TEXT NOT NULL,
-  image_type TEXT DEFAULT 'full',
   sort_order INTEGER NOT NULL DEFAULT 0,
-  expires_at TEXT DEFAULT '',
   created_at TEXT NOT NULL,
   FOREIGN KEY (quote_id) REFERENCES customer_quotes(id)
 );
@@ -156,51 +142,17 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_seller_id ON reviews(seller_id);
 
-CREATE TABLE IF NOT EXISTS guide_dismissals (
+CREATE TABLE IF NOT EXISTS deleted_quote_logs (
   id TEXT PRIMARY KEY,
-  guide_type TEXT NOT NULL,
-  ip_hash TEXT NOT NULL,
-  dismiss_date TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_guide_dismissals_lookup ON guide_dismissals(guide_type, ip_hash, dismiss_date);
-
-CREATE TABLE IF NOT EXISTS push_tokens (
-  token TEXT PRIMARY KEY,
-  platform TEXT NOT NULL DEFAULT 'android',
-  app TEXT NOT NULL DEFAULT 'public',
-  role TEXT NOT NULL DEFAULT 'public',
-  device_id TEXT DEFAULT '',
-  user_agent TEXT DEFAULT '',
-  last_url TEXT DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  quote_id TEXT DEFAULT '',
+  quote_number TEXT DEFAULT '',
+  customer TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  deleted_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_push_tokens_role ON push_tokens(role);
-CREATE INDEX IF NOT EXISTS idx_push_tokens_updated_at ON push_tokens(updated_at);
-
-CREATE TABLE IF NOT EXISTS lplan_quote_patterns (
-  id TEXT PRIMARY KEY,
-  source_quote_id TEXT DEFAULT '',
-  title TEXT DEFAULT '',
-  source_saved_at TEXT DEFAULT '',
-  synced_at TEXT NOT NULL,
-  branch TEXT DEFAULT '',
-  manager_hash TEXT DEFAULT '',
-  membership_type TEXT DEFAULT '',
-  quote_date TEXT DEFAULT '',
-  delivery_date TEXT DEFAULT '',
-  item_count INTEGER DEFAULT 0,
-  total_reg_price INTEGER DEFAULT 0,
-  total_point INTEGER DEFAULT 0,
-  total_cashback INTEGER DEFAULT 0,
-  combo_key TEXT DEFAULT '',
-  rows_json TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_lplan_quote_patterns_synced_at ON lplan_quote_patterns(synced_at);
-CREATE INDEX IF NOT EXISTS idx_lplan_quote_patterns_combo_key ON lplan_quote_patterns(combo_key);
+CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at);
 
 CREATE TABLE IF NOT EXISTS site_visit_daily (
   visit_date TEXT PRIMARY KEY,
