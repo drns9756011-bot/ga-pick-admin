@@ -19,6 +19,8 @@ let customerQuoteSyncError = "";
 let lplanSyncError = "";
 let lplanSyncing = false;
 let lplanLastCheckedAt = "";
+let adminQuoteCountdownTimer = 0;
+let adminQuoteSummaryKey = "";
 const SELLER_CHANNELS = [
   "LG전자 BEST SHOP",
   "롯데하이마트",
@@ -1276,9 +1278,64 @@ function renderApprovedSellers() {
     : `<tr><td colspan="5">아직 승인된 판매자가 없습니다.</td></tr>`;
 }
 
+const ADMIN_QUOTE_RECEIVE_HOURS = 72;
+
+function getAdminQuoteDeadline(quote) {
+  if (quote?.quoteExpiresAt) return new Date(quote.quoteExpiresAt);
+  if (!quote?.createdAt) return null;
+  const deadline = new Date(quote.createdAt);
+  deadline.setHours(deadline.getHours() + ADMIN_QUOTE_RECEIVE_HOURS);
+  return deadline;
+}
+
+function getAdminQuoteRemainingLabel(quote) {
+  if (quote?.selectedBidId) return "선택 완료";
+  const deadline = getAdminQuoteDeadline(quote);
+  if (!deadline || Number.isNaN(deadline.getTime())) return "시간 확인 중";
+  const remainingMs = deadline.getTime() - Date.now();
+  if (remainingMs <= 0 || quote.status === "closed") return "견적 종료";
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${days > 0 ? `${days}일 ` : ""}${hours}시간 ${minutes}분 ${seconds}초`;
+}
+
+function updateAdminQuoteCountdowns() {
+  const quotes = getCustomerQuotes();
+  document.querySelectorAll("[data-admin-quote-countdown]").forEach((element) => {
+    const quote = quotes.find((item) => String(item.id || "") === String(element.dataset.quoteId || ""));
+    if (!quote) return;
+    const status = quoteStatusMeta(quote);
+    element.textContent = `남은 시간 ${getAdminQuoteRemainingLabel(quote)}`;
+    element.classList.toggle("quote-expired", status.className === "quote-closed");
+  });
+  document.querySelectorAll("[data-admin-quote-status]").forEach((element) => {
+    const quote = quotes.find((item) => String(item.id || "") === String(element.dataset.quoteId || ""));
+    if (!quote) return;
+    const status = quoteStatusMeta(quote);
+    element.textContent = `견적 상태 · ${status.label}`;
+    element.className = `status ${status.className}`;
+    element.dataset.adminQuoteStatus = "";
+    element.dataset.quoteId = quote.id;
+  });
+  const summary = summarizeCustomerQuotes(quotes);
+  const nextSummaryKey = `${summary.total}:${summary.active}:${summary.closed}:${summary.unselected}`;
+  if (adminQuoteSummaryKey && adminQuoteSummaryKey !== nextSummaryKey) renderStatsCards();
+  adminQuoteSummaryKey = nextSummaryKey;
+}
+
+function startAdminQuoteCountdownTimer() {
+  if (adminQuoteCountdownTimer) return;
+  updateAdminQuoteCountdowns();
+  adminQuoteCountdownTimer = window.setInterval(updateAdminQuoteCountdowns, 1000);
+}
+
 function quoteStatusMeta(quote) {
   const now = Date.now();
-  const expiresAt = quote.quoteExpiresAt ? new Date(quote.quoteExpiresAt).getTime() : 0;
+  const deadline = getAdminQuoteDeadline(quote);
+  const expiresAt = deadline && !Number.isNaN(deadline.getTime()) ? deadline.getTime() : 0;
   if (quote.selectedBidId || quote.status === "selected") {
     return { label: "선택완료", className: "quote-selected", note: "고객님이 판매자 제안을 선택했습니다." };
   }
@@ -1360,7 +1417,7 @@ function renderCustomerQuotes() {
                 <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
                 <p>${escapeHTML(quote.customer || "-")} · ${escapeHTML(formatPhoneNumber(quote.phone))}</p>
               </div>
-              <span class="status ${status.className}">견적 상태 · ${status.label}</span>
+              <span class="status ${status.className}" data-admin-quote-status data-quote-id="${escapeHTML(quote.id)}">견적 상태 · ${status.label}</span>
             </div>
             <div class="quote-admin-meta">
               <span>견적번호 ${escapeHTML(quote.quoteNumber || "-")}</span>
@@ -1370,6 +1427,7 @@ function renderCustomerQuotes() {
               <span>등록 ${escapeHTML(formatDate(quote.createdAt))}</span>
               <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
               <span>제안 ${escapeHTML(String(quote.bidCount || quote.bidsCount || 0))}건</span>
+              <span data-admin-quote-countdown data-quote-id="${escapeHTML(quote.id)}">남은 시간 ${escapeHTML(getAdminQuoteRemainingLabel(quote))}</span>
             </div>
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
             ${renderQuoteBidSummary(quote)}
@@ -1713,6 +1771,7 @@ function renderAll() {
   renderApprovedSellers();
   renderMessages();
   applyAdminPageView();
+  startAdminQuoteCountdownTimer();
 
   document.querySelectorAll("[data-application-filter]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.applicationFilter === applicationFilter);

@@ -2082,3 +2082,14 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
   }
 }
 
+
+
+[data-admin-quote-countdown] {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+[data-admin-quote-countdown].quote-expired {
+  color: #b91c1c;
+  font-weight: 800;
+}
