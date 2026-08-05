@@ -13,21 +13,10 @@ const STORAGE_KEYS = {
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
-// 서버 데이터는 브라우저에 영구 보관하지 않습니다.
-// 관리자 페이지를 다시 열면 사용자가 "새로고침"을 눌렀을 때만 최신 D1 데이터를 불러옵니다.
-[
-  STORAGE_KEYS.sellerApplications,
-  STORAGE_KEYS.approvedSellers,
-  STORAGE_KEYS.alimtalkQueue,
-  STORAGE_KEYS.customerQuotes,
-  STORAGE_KEYS.deletedQuoteLogs,
-  STORAGE_KEYS.lplanTrainingQuotes,
-  `${STORAGE_KEYS.lplanTrainingQuotes}:summary`,
-  STORAGE_KEYS.visitStats,
-  STORAGE_KEYS.sellerAccessLogs,
-  STORAGE_KEYS.sellerAccessSummary,
-  STORAGE_KEYS.adminLastRefreshedAt,
-].forEach((key) => localStorage.removeItem(key));
+// 마지막으로 정상 조회한 서버 데이터는 화면 표시용 스냅샷으로 유지합니다.
+// 메뉴 이동이나 페이지 재실행만으로 서버를 다시 조회하지 않으며,
+// 사용자가 상단 새로고침을 눌렀을 때만 새 데이터로 교체합니다.
+
 
 let applicationFilter = "pending";
 let messageFilter = "all";
@@ -507,10 +496,15 @@ async function apiJson(path, options = {}) {
           }
         }
       }
+      const message = payload?.message || `서버 요청에 실패했습니다. (${response.status})`;
+      if (response.status === 503 && payload?.code === "ADMIN_TOKEN_NOT_CONFIGURED") {
+        showToast("Cloudflare 관리자 Worker의 ADMIN_API_TOKEN Secret을 다시 설정해주세요.");
+      }
       return {
         ok: false,
         status: response.status,
-        message: payload?.message || `서버 요청에 실패했습니다. (${response.status})`,
+        code: payload?.code || "",
+        message,
       };
     }
     return payload;
@@ -621,16 +615,15 @@ async function loadAdminDataFromServer(options = {}) {
   const token = await requestAdminApiToken();
   if (!token) {
     updateLastRefreshedDisplay();
-    return;
+    return { ok: false, message: "관리자 API 토큰이 필요합니다." };
   }
   if (!silent) {
     setAdminLoading(true, "관리자 데이터를 한 번에 불러오는 중입니다.", "최신 운영 정보와 방문자 통계를 확인하고 있습니다.");
   }
-  clearCurrentAdminData();
-  renderAll();
+
   try {
     const requestOptions = { silent: true };
-    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = await Promise.all([
+    const results = await Promise.all([
       loadSellerApplicationsFromServer(requestOptions),
       loadApprovedSellersFromServer(requestOptions),
       loadAlimtalkMessagesFromServer(requestOptions),
@@ -641,30 +634,71 @@ async function loadAdminDataFromServer(options = {}) {
       loadSellerAccessLogsFromServer({ silent: true }),
     ]);
 
-    if (applications?.ok && Array.isArray(applications.rows)) writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
-    if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) {
-      // 승인 판매자 목록은 서버의 approved_sellers 테이블만 신뢰합니다.
-      // 판매자 신청 목록이나 과거 브라우저 캐시와 합치지 않습니다.
-      writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
+    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = results;
+    const authFailure = results.find((result) =>
+      result && result.ok === false && [401, 503].includes(Number(result.status || 0))
+    );
+
+    if (authFailure) {
+      const message = authFailure.message || "관리자 인증 설정을 확인해주세요.";
+      showToast(message);
+      renderAll();
+      updateLastRefreshedDisplay();
+      return { ok: false, message };
     }
-    if (messages?.ok && Array.isArray(messages.rows)) writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
-    if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
-    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
-    if (visitStats?.ok) localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+
+    let updatedCount = 0;
+    if (applications?.ok && Array.isArray(applications.rows)) {
+      writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
+      updatedCount += 1;
+    }
+    if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) {
+      writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
+      updatedCount += 1;
+    }
+    if (messages?.ok && Array.isArray(messages.rows)) {
+      writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
+      updatedCount += 1;
+    }
+    if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
+      writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
+      updatedCount += 1;
+    }
+    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) {
+      writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
+      updatedCount += 1;
+    }
+    if (visitStats?.ok) {
+      localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+      updatedCount += 1;
+    }
     if (sellerAccess?.ok && Array.isArray(sellerAccess.rows)) {
       writeStorageArray(STORAGE_KEYS.sellerAccessLogs, sellerAccess.rows);
       localStorage.setItem(STORAGE_KEYS.sellerAccessSummary, JSON.stringify(sellerAccess.summary || {}));
+      updatedCount += 1;
     }
     if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
       writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, lplanTraining.rows);
       if (lplanTraining.summary) {
         localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(lplanTraining.summary));
       }
+      updatedCount += 1;
     }
 
-    const refreshedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
-    updateLastRefreshedDisplay(refreshedAt);
+    if (updatedCount > 0) {
+      const refreshedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
+      updateLastRefreshedDisplay(refreshedAt);
+      renderAll();
+      return { ok: true, updatedCount };
+    }
+
+    const firstError = results.find((result) => result && result.ok === false);
+    const message = firstError?.message || "서버 데이터를 불러오지 못했습니다. 기존 화면 데이터는 유지합니다.";
+    showToast(message);
+    renderAll();
+    updateLastRefreshedDisplay();
+    return { ok: false, message };
   } finally {
     if (!silent) setAdminLoading(false);
   }
@@ -2237,7 +2271,7 @@ adminAuthBtn?.addEventListener("click", async () => {
   if (!token) return;
   const status = await apiJson("/api/auth-status", { silent: true });
   showToast(status?.ok
-    ? `관리자 인증이 완료되었습니다. (${status.tokenSource === "cloudflare-secret" ? "Cloudflare Secret" : "기본 보안 토큰"})`
+    ? `관리자 인증이 완료되었습니다. (${status.tokenSource || "Cloudflare Secret"})`
     : status?.message || "관리자 인증에 실패했습니다.");
   if (status?.ok) {
     showToast("인증이 완료되었습니다. 서버 데이터는 새로고침 버튼을 눌러 불러오세요.");
@@ -2248,9 +2282,8 @@ refreshBtn.addEventListener("click", async () => {
   refreshBtn.disabled = true;
   refreshBtn.textContent = "갱신 중";
   try {
-    await loadAdminDataFromServer();
-    renderAll();
-    showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
+    const result = await loadAdminDataFromServer();
+    if (result?.ok) showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
   } finally {
     refreshBtn.disabled = false;
     refreshBtn.textContent = "새로고침";

@@ -32,14 +32,31 @@ function json(payload, status = 200) {
   });
 }
 
+function getAdminTokenEntries(env) {
+  const candidates = [
+    ["ADMIN_API_TOKEN", env?.ADMIN_API_TOKEN],
+    ["ADMIN_TOKEN", env?.ADMIN_TOKEN],
+    ["ADMIN_API_SECRET", env?.ADMIN_API_SECRET],
+  ];
+  const seen = new Set();
+  return candidates
+    .map(([name, value]) => ({ name, value: String(value || "").trim() }))
+    .filter((entry) => entry.value && !seen.has(entry.value) && seen.add(entry.value));
+}
+
 function getAdminTokens(env) {
-  const runtimeToken = String(env.ADMIN_API_TOKEN || "").trim();
-  return runtimeToken ? [runtimeToken] : [];
+  return getAdminTokenEntries(env).map((entry) => entry.value);
 }
 
 function requireAdmin(request, env) {
   const expectedTokens = getAdminTokens(env);
-  if (!expectedTokens.length) return json({ ok: false, message: "관리자 인증 토큰을 사용할 수 없습니다." }, 500);
+  if (!expectedTokens.length) {
+    return json({
+      ok: false,
+      code: "ADMIN_TOKEN_NOT_CONFIGURED",
+      message: "Cloudflare 관리자 Worker에 ADMIN_API_TOKEN Secret이 설정되지 않았습니다.",
+    }, 503);
+  }
   const bearer = String(request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const actual = String(request.headers.get("X-Admin-Token") || bearer || "").trim();
   if (!expectedTokens.includes(actual)) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
@@ -1755,11 +1772,12 @@ async function getSellerAccessLogs(env, request) {
 }
 
 function getAdminAuthStatus(env) {
+  const tokenEntries = getAdminTokenEntries(env);
   return json({
     ok: true,
     authenticated: true,
-    hasRuntimeToken: Boolean(String(env.ADMIN_API_TOKEN || "").trim()),
-    tokenSource: String(env.ADMIN_API_TOKEN || "").trim() ? "cloudflare-secret" : "missing",
+    hasRuntimeToken: tokenEntries.length > 0,
+    tokenSource: tokenEntries[0]?.name || "missing",
     hasDb: Boolean(env.DB),
     hasFiles: Boolean(env.FILES),
   });

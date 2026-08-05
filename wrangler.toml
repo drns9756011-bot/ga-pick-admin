@@ -1,6 +1,10 @@
 name = "ga-pick-admin"
 main = "src/index.js"
 compatibility_date = "2026-08-05"
+keep_vars = true
+
+[secrets]
+required = ["ADMIN_API_TOKEN"]
 
 [vars]
 SOLAPI_CHANNEL_ID = "KA01PF260720091629575EzVmd2YRyU7"
