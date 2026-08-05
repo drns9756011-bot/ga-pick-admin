@@ -2196,3 +2196,71 @@ body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
   .seller-access-summary { grid-template-columns: 1fr; }
 }
 .seller-access-panel[hidden] { display: none !important; }
+
+
+/* 고객 견적 통합 검색 */
+.customer-quote-search {
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.customer-quote-search > label {
+  color: #263744;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.customer-quote-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-quote-search-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+  outline: none;
+}
+
+.customer-quote-search-row input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(18, 107, 93, 0.12);
+}
+
+.customer-quote-search-row .plain-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.customer-quote-search > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .customer-quote-search {
+    padding: 14px 16px;
+  }
+
+  .customer-quote-search-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-quote-search-row .plain-btn {
+    width: 100%;
+  }
+}

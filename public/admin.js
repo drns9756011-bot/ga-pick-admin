@@ -23,6 +23,7 @@ let lplanSyncing = false;
 let lplanLastCheckedAt = "";
 let adminQuoteCountdownTimer = 0;
 let adminQuoteSummaryKey = "";
+let customerQuoteSearchTerm = "";
 const SELLER_CHANNELS = [
   "LG전자 BEST SHOP",
   "롯데하이마트",
@@ -211,6 +212,14 @@ customerQuoteSection.innerHTML = `
     </div>
     <p class="panel-note">고객 견적 저장 여부와 알림톡 발송 상태를 확인합니다.</p>
   </div>
+  <div class="customer-quote-search" role="search" aria-label="고객 견적 검색">
+    <label for="customerQuoteSearch">견적 검색</label>
+    <div class="customer-quote-search-row">
+      <input id="customerQuoteSearch" type="search" inputmode="search" autocomplete="off" placeholder="견적번호, 고객명, 휴대전화번호 검색" />
+      <button class="plain-btn" id="customerQuoteSearchClear" type="button" hidden>검색 초기화</button>
+    </div>
+    <p id="customerQuoteSearchSummary" aria-live="polite">전체 견적을 표시합니다.</p>
+  </div>
   <div class="quote-admin-list" id="customerQuoteList"></div>
   <div class="deleted-quote-log">
     <h3>삭제된 견적 기록</h3>
@@ -219,6 +228,9 @@ customerQuoteSection.innerHTML = `
 `;
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
+const customerQuoteSearch = document.querySelector("#customerQuoteSearch");
+const customerQuoteSearchClear = document.querySelector("#customerQuoteSearchClear");
+const customerQuoteSearchSummary = document.querySelector("#customerQuoteSearchSummary");
 const deletedQuoteList = document.querySelector("#deletedQuoteList");
 
 const lplanSyncSection = document.createElement("section");
@@ -1588,9 +1600,48 @@ function renderQuoteBidSummary(quote) {
   `;
 }
 
+function normalizeCustomerQuoteSearchValue(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("ko-KR")
+    .replace(/[\s-]+/g, "");
+}
+
+function customerQuoteMatchesSearch(quote, searchTerm) {
+  const normalizedSearch = normalizeCustomerQuoteSearchValue(searchTerm);
+  if (!normalizedSearch) return true;
+
+  const textCandidates = [
+    quote.quoteNumber,
+    quote.customer,
+    quote.phone,
+    quote.id,
+  ].map(normalizeCustomerQuoteSearchValue);
+
+  if (textCandidates.some((candidate) => candidate.includes(normalizedSearch))) return true;
+
+  const phoneDigits = String(searchTerm || "").replace(/\D/g, "");
+  return Boolean(phoneDigits) && normalizePhone(quote.phone).includes(phoneDigits);
+}
+
 function renderCustomerQuotes() {
   if (!customerQuoteList) return;
-  const quotes = getCustomerQuotes();
+  const allQuotes = getCustomerQuotes();
+  const searchTerm = customerQuoteSearchTerm.trim();
+  const quotes = searchTerm
+    ? allQuotes.filter((quote) => customerQuoteMatchesSearch(quote, searchTerm))
+    : allQuotes;
+
+  if (customerQuoteSearch && customerQuoteSearch.value !== customerQuoteSearchTerm) {
+    customerQuoteSearch.value = customerQuoteSearchTerm;
+  }
+  if (customerQuoteSearchClear) customerQuoteSearchClear.hidden = !searchTerm;
+  if (customerQuoteSearchSummary) {
+    customerQuoteSearchSummary.textContent = searchTerm
+      ? `검색 결과 ${quotes.length}건 · 전체 ${allQuotes.length}건`
+      : `전체 ${allQuotes.length}건`;
+  }
+
   customerQuoteList.innerHTML = quotes.length
     ? quotes.map((quote) => {
       const status = quoteStatusMeta(quote);
@@ -1634,12 +1685,19 @@ function renderCustomerQuotes() {
         </article>
       `;
     }).join("")
-    : `
-      <div class="empty-state">
-        <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
-        <p>${escapeHTML(customerQuoteSyncError || "노출용에서 고객 견적이 등록되면 이곳에 저장 현황과 알림톡 상태가 표시됩니다.")}</p>
-      </div>
-    `;
+    : searchTerm && allQuotes.length
+      ? `
+        <div class="empty-state">
+          <strong>검색 결과가 없습니다.</strong>
+          <p>견적번호, 고객명 또는 휴대전화번호를 다시 확인해주세요.</p>
+        </div>
+      `
+      : `
+        <div class="empty-state">
+          <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
+          <p>${escapeHTML(customerQuoteSyncError || "노출용에서 고객 견적이 등록되면 이곳에 저장 현황과 알림톡 상태가 표시됩니다.")}</p>
+        </div>
+      `;
   renderDeletedQuoteLogs();
 }
 
@@ -1986,6 +2044,16 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("#customerQuoteSearchClear")) {
+    customerQuoteSearchTerm = "";
+    if (customerQuoteSearch) {
+      customerQuoteSearch.value = "";
+      customerQuoteSearch.focus();
+    }
+    renderCustomerQuotes();
+    return;
+  }
+
   const statAction = event.target.closest("[data-stat-action]");
   if (statAction) {
     openStatAction(statAction.dataset.statAction);
@@ -2105,6 +2173,11 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target === customerQuoteSearch) {
+    customerQuoteSearchTerm = event.target.value;
+    renderCustomerQuotes();
+    return;
+  }
   if (!event.target.matches("[data-phone-edit]")) return;
   event.target.value = formatPhoneNumber(event.target.value);
 });
