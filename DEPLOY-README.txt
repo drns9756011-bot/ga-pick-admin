@@ -1,18 +1,8 @@
-픽견적 관리자용 배포본입니다.
+픽견적 관리자용 통합 수정본
 
-수정 내용
-1. 승인 판매자 테이블/컬럼 자동 점검 및 승인 신청 누락 계정 복구
-2. status 값이 비어 있는 과거 승인 판매자도 목록에 표시
-3. 고객 견적 삭제 시 실제 존재하는 관련 테이블만 찾아 일괄 삭제
-4. 서버 삭제 성공 후에만 관리자 화면에서 견적 제거
-5. 실패 시 서버 오류 문구를 관리자 화면에 표시
-
-배포 위치
-- ga-pick-admin 관리자용 Cloudflare Workers 프로젝트
-- 노출용 ga-pick.com 프로젝트에 배포하지 마세요.
-
-Cloudflare 기존 설정 유지
-- ADMIN_API_TOKEN Secret
-- SOLAPI_API_KEY / SOLAPI_API_SECRET Secret
-- DB D1 바인딩
-- FILES R2 바인딩
+1. 관리자용 Cloudflare Workers 프로젝트에 이 폴더 전체를 배포합니다.
+2. 기존 D1(DB)·R2(FILES) 바인딩을 유지합니다.
+3. ADMIN_API_TOKEN은 ZIP에 포함하지 않습니다. Cloudflare Production Secret에 설정한 값만 사용합니다.
+4. 관리자 페이지는 접속·메뉴 이동 때 서버를 자동 조회하지 않습니다. 상단 새로고침 버튼을 눌렀을 때만 전체 데이터를 불러옵니다.
+5. 판매자 삭제는 approved_sellers와 seller_applications에서 실제 삭제하고, 재생성 방지 기록만 deleted_seller_accounts에 남깁니다.
+6. 마스터 계정 pickgj는 삭제할 수 없습니다.

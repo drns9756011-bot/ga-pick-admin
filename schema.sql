@@ -190,3 +190,14 @@ CREATE TABLE IF NOT EXISTS seller_access_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_seller_access_logs_seller_time ON seller_access_logs(seller_id, accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_seller_access_logs_date ON seller_access_logs(access_date, accessed_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS deleted_seller_accounts (
+  seller_id TEXT PRIMARY KEY,
+  approved_seller_id TEXT DEFAULT '',
+  channel TEXT DEFAULT '',
+  branch TEXT DEFAULT '',
+  manager TEXT DEFAULT '',
+  deleted_at TEXT NOT NULL,
+  delete_reason TEXT DEFAULT ''
+);

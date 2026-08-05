@@ -13,6 +13,22 @@ const STORAGE_KEYS = {
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
+// 서버 데이터는 브라우저에 영구 보관하지 않습니다.
+// 관리자 페이지를 다시 열면 사용자가 "새로고침"을 눌렀을 때만 최신 D1 데이터를 불러옵니다.
+[
+  STORAGE_KEYS.sellerApplications,
+  STORAGE_KEYS.approvedSellers,
+  STORAGE_KEYS.alimtalkQueue,
+  STORAGE_KEYS.customerQuotes,
+  STORAGE_KEYS.deletedQuoteLogs,
+  STORAGE_KEYS.lplanTrainingQuotes,
+  `${STORAGE_KEYS.lplanTrainingQuotes}:summary`,
+  STORAGE_KEYS.visitStats,
+  STORAGE_KEYS.sellerAccessLogs,
+  STORAGE_KEYS.sellerAccessSummary,
+  STORAGE_KEYS.adminLastRefreshedAt,
+].forEach((key) => localStorage.removeItem(key));
+
 let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
@@ -587,6 +603,19 @@ async function forceLplanTrainingSync() {
   renderAll();
 }
 
+function clearCurrentAdminData() {
+  writeStorageArray(STORAGE_KEYS.sellerApplications, []);
+  writeStorageArray(STORAGE_KEYS.approvedSellers, []);
+  writeStorageArray(STORAGE_KEYS.alimtalkQueue, []);
+  writeStorageArray(STORAGE_KEYS.customerQuotes, []);
+  writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, []);
+  writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, []);
+  writeStorageArray(STORAGE_KEYS.sellerAccessLogs, []);
+  localStorage.removeItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`);
+  localStorage.removeItem(STORAGE_KEYS.visitStats);
+  localStorage.removeItem(STORAGE_KEYS.sellerAccessSummary);
+}
+
 async function loadAdminDataFromServer(options = {}) {
   const silent = Boolean(options.silent);
   const token = await requestAdminApiToken();
@@ -597,6 +626,8 @@ async function loadAdminDataFromServer(options = {}) {
   if (!silent) {
     setAdminLoading(true, "관리자 데이터를 한 번에 불러오는 중입니다.", "최신 운영 정보와 방문자 통계를 확인하고 있습니다.");
   }
+  clearCurrentAdminData();
+  renderAll();
   try {
     const requestOptions = { silent: true };
     const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = await Promise.all([
@@ -612,13 +643,9 @@ async function loadAdminDataFromServer(options = {}) {
 
     if (applications?.ok && Array.isArray(applications.rows)) writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
     if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) {
-      let approvedRows = approvedSellers.rows;
-      if (!approvedRows.length && applications?.ok && Array.isArray(applications.rows)) {
-        approvedRows = applications.rows
-          .filter((row) => ["approved", "active", "승인"].includes(String(row.status || "").trim().toLowerCase()))
-          .map((row) => ({ ...row, status: "approved" }));
-      }
-      writeStorageArray(STORAGE_KEYS.approvedSellers, approvedRows);
+      // 승인 판매자 목록은 서버의 approved_sellers 테이블만 신뢰합니다.
+      // 판매자 신청 목록이나 과거 브라우저 캐시와 합치지 않습니다.
+      writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
     }
     if (messages?.ok && Array.isArray(messages.rows)) writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
     if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
@@ -651,10 +678,9 @@ async function syncApplicationStatusToServer(applicationId, status, reviewMemo) 
 
   if (!result?.ok) {
     showToast(result?.message || "판매자 신청 상태 변경에 실패했습니다.");
-    return;
+    return null;
   }
-  await loadAdminDataFromServer();
-  renderAll();
+  return result;
 }
 
 async function syncMessageStatusToServer(messageId, payload) {
@@ -676,11 +702,11 @@ async function resendMessage(messageId) {
   });
   if (result?.row) {
     updateMessage(messageId, (message) => Object.assign(message, result.row));
-  } else {
-    await loadAdminDataFromServer();
-    renderAll();
+  } else if (!result?.ok) {
+    showToast(result?.message || "알림톡 재발송에 실패했습니다.");
+    return;
   }
-  showToast(result?.message || (result?.ok ? "알림톡을 재발송했습니다." : "알림톡 재발송에 실패했습니다."));
+  showToast(result?.message || "알림톡을 재발송했습니다.");
 }
 
 async function refreshMessageStatus(messageId) {
@@ -689,11 +715,11 @@ async function refreshMessageStatus(messageId) {
   });
   if (result?.row) {
     updateMessage(messageId, (message) => Object.assign(message, result.row));
-  } else {
-    await loadAdminDataFromServer();
-    renderAll();
+  } else if (!result?.ok) {
+    showToast(result?.message || "알림톡 상태 확인에 실패했습니다.");
+    return;
   }
-  showToast(result?.ok ? "알림톡 최종 상태를 확인했습니다." : result?.message || "알림톡 상태 확인에 실패했습니다.");
+  showToast("알림톡 최종 상태를 확인했습니다.");
 }
 
 async function deleteMessage(messageId) {
@@ -747,7 +773,11 @@ async function syncApprovedSellerPasswordToServer(sellerId, password) {
     return false;
   }
 
-  await loadAdminDataFromServer();
+  if (result.row) {
+    setApprovedSellers(getApprovedSellers().map((seller) =>
+      seller.id === sellerId ? { ...seller, ...result.row } : seller
+    ));
+  }
   renderAll();
   return true;
 }
@@ -798,7 +828,13 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
     return false;
   }
 
-  await loadAdminDataFromServer();
+  setApprovedSellers(getApprovedSellers().filter((seller) =>
+    String(seller.id) !== String(sellerId) && String(seller.sellerId || "") !== String(result.sellerId || "")
+  ));
+  setApplications(getApplications().filter((application) =>
+    String(application.id) !== String(sellerId) && String(application.sellerId || "") !== String(result.sellerId || "")
+  ));
+  if (selectedApplicationId === sellerId) selectedApplicationId = "";
   renderAll();
   return true;
 }
@@ -1337,46 +1373,50 @@ function renderApplicationDetail(application) {
   `;
 }
 
-function approveApplication(applicationId) {
+async function approveApplication(applicationId) {
   const applications = getApplications();
   const application = applications.find((row) => row.id === applicationId);
   if (!application || application.status !== "pending") return;
 
   const memo = document.querySelector("#reviewMemo")?.value.trim() || "승인되었습니다.";
-  const approvedSellers = getApprovedSellers();
-  const exists = approvedSellers.some((seller) => seller.sellerId === application.sellerId);
-  const reviewedAt = new Date().toISOString();
+  const result = await syncApplicationStatusToServer(application.id, "approved", memo);
+  if (!result?.ok) return;
 
-  if (!exists) {
-    const { password, ...safeApplication } = application;
-    approvedSellers.unshift({
-      ...safeApplication,
-      status: "approved",
-      reviewedAt,
-      reviewMemo: memo,
-      approvedAt: reviewedAt,
-    });
-    setApprovedSellers(approvedSellers);
+  const updatedApplication = result.row || {
+    ...application,
+    status: "approved",
+    reviewedAt: new Date().toISOString(),
+    reviewMemo: memo,
+  };
+  setApplications(applications.map((row) => row.id === applicationId ? { ...row, ...updatedApplication } : row));
+  if (result.approvedSeller) {
+    const current = getApprovedSellers().filter((row) =>
+      row.id !== result.approvedSeller.id && row.sellerId !== result.approvedSeller.sellerId
+    );
+    setApprovedSellers([result.approvedSeller, ...current]);
   }
-
-  Object.assign(application, { status: "approved", reviewedAt, reviewMemo: memo });
-  setApplications(applications);
-  showToast("판매자 신청을 승인했습니다.");
+  showToast("판매자 신청을 승인하고 서버에 저장했습니다.");
   renderAll();
-  syncApplicationStatusToServer(application.id, "approved", memo);
 }
 
-function rejectApplication(applicationId) {
+async function rejectApplication(applicationId) {
   const applications = getApplications();
   const application = applications.find((row) => row.id === applicationId);
   if (!application || application.status !== "pending") return;
 
   const memo = document.querySelector("#reviewMemo")?.value.trim() || "등록 정보 확인이 필요합니다.";
-  Object.assign(application, { status: "rejected", reviewedAt: new Date().toISOString(), reviewMemo: memo });
-  setApplications(applications);
-  showToast("판매자 신청을 반려했습니다. 반려 알림은 필요 시 수동 발송하세요.");
+  const result = await syncApplicationStatusToServer(application.id, "rejected", memo);
+  if (!result?.ok) return;
+
+  const updatedApplication = result.row || {
+    ...application,
+    status: "rejected",
+    reviewedAt: new Date().toISOString(),
+    reviewMemo: memo,
+  };
+  setApplications(applications.map((row) => row.id === applicationId ? { ...row, ...updatedApplication } : row));
+  showToast("판매자 신청을 반려하고 서버에 저장했습니다. 반려 알림은 필요 시 수동 발송하세요.");
   renderAll();
-  syncApplicationStatusToServer(application.id, "rejected", memo);
 }
 
 async function queueManualApplicationTalk(applicationId) {
@@ -1831,7 +1871,6 @@ async function resetApprovedSellerPassword(sellerId) {
     return;
   }
   const ok = await syncApprovedSellerPasswordToServer(sellerId, String(nextPassword).trim());
-  if (ok) await loadAdminDataFromServer();
   showToast(ok ? "비밀번호가 초기화되었습니다." : "비밀번호 초기화에 실패했습니다.");
   renderAll();
 }
@@ -2201,8 +2240,7 @@ adminAuthBtn?.addEventListener("click", async () => {
     ? `관리자 인증이 완료되었습니다. (${status.tokenSource === "cloudflare-secret" ? "Cloudflare Secret" : "기본 보안 토큰"})`
     : status?.message || "관리자 인증에 실패했습니다.");
   if (status?.ok) {
-    await loadAdminDataFromServer();
-    renderAll();
+    showToast("인증이 완료되었습니다. 서버 데이터는 새로고침 버튼을 눌러 불러오세요.");
   }
 });
 
@@ -2221,8 +2259,9 @@ refreshBtn.addEventListener("click", async () => {
 
 
 window.addEventListener("storage", (event) => {
-  if (!Object.values(STORAGE_KEYS).includes(event.key)) return;
-  renderAll();
+  // 다른 탭의 과거 목록 데이터는 현재 화면과 합치지 않습니다.
+  // 관리자 토큰이 변경된 경우에만 인증 상태를 다음 요청에서 다시 사용합니다.
+  if (event.key !== STORAGE_KEYS.adminApiToken) return;
 });
 
 const initialApplicationIdFromUrl = new URLSearchParams(window.location.search).get("applicationId") || "";
@@ -2233,7 +2272,7 @@ if (initialApplicationIdFromUrl) {
 
 updateLastRefreshedDisplay();
 renderAll();
-loadAdminDataFromServer().finally(renderAll);
+showToast("서버 데이터는 상단 새로고침 버튼을 눌렀을 때만 불러옵니다.");
 
 
 

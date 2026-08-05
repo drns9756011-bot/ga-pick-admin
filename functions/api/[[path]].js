@@ -5,8 +5,6 @@ const jsonHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
-const BUNDLED_ADMIN_API_TOKEN = "GAPICK-8hsPzbEXfpTasO0h7J8MfSjx1tDnZ4Fna0T38TTu9Yc";
-
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
   SOLAPI_FROM: "01066312323",
@@ -35,10 +33,8 @@ function json(payload, status = 200) {
 }
 
 function getAdminTokens(env) {
-  return Array.from(new Set([
-    String(env.ADMIN_API_TOKEN || "").trim(),
-    String(BUNDLED_ADMIN_API_TOKEN || "").trim(),
-  ].filter(Boolean)));
+  const runtimeToken = String(env.ADMIN_API_TOKEN || "").trim();
+  return runtimeToken ? [runtimeToken] : [];
 }
 
 function requireAdmin(request, env) {
@@ -777,6 +773,20 @@ async function ensureSellerTablesAndColumns(env) {
   }
 }
 
+async function ensureDeletedSellerTables(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS deleted_seller_accounts (
+      seller_id TEXT PRIMARY KEY,
+      approved_seller_id TEXT DEFAULT '',
+      channel TEXT DEFAULT '',
+      branch TEXT DEFAULT '',
+      manager TEXT DEFAULT '',
+      deleted_at TEXT NOT NULL,
+      delete_reason TEXT DEFAULT ''
+    )`
+  ).run();
+}
+
 async function tablesWithColumn(env, columnName) {
   const tables = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
@@ -834,6 +844,10 @@ async function updateSellerApplication(env, request, id) {
 
   if (status === "approved") {
     const approvedAt = reviewedAt;
+    await ensureDeletedSellerTables(env);
+    await env.DB.prepare("DELETE FROM deleted_seller_accounts WHERE seller_id = ?")
+      .bind(updated.sellerId)
+      .run();
     await env.DB.prepare(
       `INSERT OR REPLACE INTO approved_sellers
         (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
@@ -901,60 +915,22 @@ async function updateSellerApplication(env, request, id) {
     });
   }
 
-  return json({ ok: true, row: updated });
-}
-
-async function repairMissingApprovedSellers(env) {
-  await ensureSellerTablesAndColumns(env);
-  const missing = await env.DB.prepare(
-    `SELECT a.*
-       FROM seller_applications a
-       LEFT JOIN approved_sellers s ON s.seller_id = a.seller_id
-      WHERE LOWER(TRIM(COALESCE(a.status, ''))) IN ('approved', 'active')
-        AND s.seller_id IS NULL`
-  ).all();
-
-  let repairedCount = 0;
-  for (const row of missing.results || []) {
-    try {
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO approved_sellers
-          (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
-           card_image, card_image_key, memo, consent_json, requested_at, reviewed_at, review_memo, approved_at)
-         VALUES (?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          row.id || createId("approved-seller"),
-          row.seller_id || "",
-          await protectStoredPassword(row.password || ""),
-          row.channel || "",
-          row.branch || "",
-          row.branch_region || "",
-          row.manager || "",
-          row.manager_position || "",
-          row.phone || "",
-          row.card_image || "",
-          row.card_image_key || "",
-          row.memo || "",
-          row.consent_json || "{}",
-          row.requested_at || "",
-          row.reviewed_at || "",
-          row.review_memo || "",
-          row.reviewed_at || row.requested_at || new Date().toISOString()
-        )
-        .run();
-      repairedCount += 1;
-    } catch (error) {
-      console.warn("승인 판매자 자동 복구 실패", row.seller_id, error);
-    }
+  let approvedSeller = null;
+  if (status === "approved") {
+    approvedSeller = normalizeApprovedSeller(
+      await env.DB.prepare("SELECT * FROM approved_sellers WHERE seller_id = ?")
+        .bind(updated.sellerId)
+        .first()
+    );
   }
-
-  return repairedCount;
+  return json({ ok: true, row: updated, approvedSeller });
 }
 
 async function getApprovedSellers(env) {
   await ensureSellerTablesAndColumns(env);
-  const repairedCount = await repairMissingApprovedSellers(env);
+  // 조회 과정에서 판매자 계정을 자동 복구하지 않습니다.
+  // 승인/삭제는 관리자 작업에서만 명시적으로 변경됩니다.
+  const repairedCount = 0;
   const result = await env.DB.prepare(
     `SELECT * FROM approved_sellers
       WHERE LOWER(TRIM(COALESCE(status, 'approved'))) NOT IN ('deleted', 'rejected', 'disabled')
@@ -1411,16 +1387,56 @@ async function updateApprovedSeller(env, request, id) {
 
 async function deleteApprovedSeller(env, id) {
   await ensureSellerTablesAndColumns(env);
-  const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
+  await ensureDeletedSellerTables(env);
+  const existing = await env.DB.prepare(
+    "SELECT * FROM approved_sellers WHERE id = ? OR seller_id = ? LIMIT 1"
+  ).bind(id, id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
-  const deleteResult = await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
-  if (Number(deleteResult?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "승인 판매자 계정이 서버에서 삭제되지 않았습니다." }, 500);
+  const sellerId = String(existing.seller_id || "").trim();
+  if (sellerId === "pickgj") {
+    return json({ ok: false, message: "마스터 판매자 계정은 삭제할 수 없습니다." }, 400);
   }
-  const remaining = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
-  if (remaining) return json({ ok: false, message: "판매자 계정 삭제 후 서버 재확인에 실패했습니다." }, 500);
-  return json({ ok: true, id });
+
+  const deletedAt = new Date().toISOString();
+  const deleteReason = "관리자 승인 판매자 계정 삭제";
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR REPLACE INTO deleted_seller_accounts
+        (seller_id, approved_seller_id, channel, branch, manager, deleted_at, delete_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      sellerId,
+      String(existing.id || ""),
+      String(existing.channel || ""),
+      String(existing.branch || ""),
+      String(existing.manager || ""),
+      deletedAt,
+      deleteReason
+    ),
+    env.DB.prepare("DELETE FROM approved_sellers WHERE id = ? OR seller_id = ?").bind(id, sellerId),
+    env.DB.prepare("DELETE FROM seller_applications WHERE id = ? OR seller_id = ?").bind(id, sellerId),
+  ]);
+
+  if (existing.card_image_key && env.FILES) {
+    try {
+      await env.FILES.delete(String(existing.card_image_key));
+    } catch (error) {
+      console.warn("판매자 명함 R2 삭제 실패", existing.card_image_key, error);
+    }
+  }
+
+  const remainingApproved = await env.DB.prepare(
+    "SELECT id FROM approved_sellers WHERE id = ? OR seller_id = ? LIMIT 1"
+  ).bind(id, sellerId).first();
+  const remainingApplication = await env.DB.prepare(
+    "SELECT id FROM seller_applications WHERE id = ? OR seller_id = ? LIMIT 1"
+  ).bind(id, sellerId).first();
+  if (remainingApproved || remainingApplication) {
+    return json({ ok: false, message: "판매자 계정이 서버에서 완전히 삭제되지 않았습니다." }, 500);
+  }
+
+  return json({ ok: true, id: String(existing.id || id), sellerId, deletedAt });
 }
 
 async function getAlimtalk(env) {
@@ -1743,7 +1759,7 @@ function getAdminAuthStatus(env) {
     ok: true,
     authenticated: true,
     hasRuntimeToken: Boolean(String(env.ADMIN_API_TOKEN || "").trim()),
-    tokenSource: String(env.ADMIN_API_TOKEN || "").trim() ? "cloudflare-secret" : "bundled-fallback",
+    tokenSource: String(env.ADMIN_API_TOKEN || "").trim() ? "cloudflare-secret" : "missing",
     hasDb: Boolean(env.DB),
     hasFiles: Boolean(env.FILES),
   });
