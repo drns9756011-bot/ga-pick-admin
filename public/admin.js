@@ -47,6 +47,7 @@ const sellerAccessDays = document.querySelector("#sellerAccessDays");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
+const adminAuthBtn = document.querySelector("#adminAuthBtn");
 const adminActions = document.querySelector(".admin-actions");
 const adminLastUpdated = document.createElement("span");
 adminLastUpdated.className = "admin-last-updated";
@@ -417,9 +418,10 @@ function openAdminTextModal(options = {}) {
 
 let adminTokenRequestPromise = null;
 
-async function requestAdminApiToken() {
+async function requestAdminApiToken(force = false) {
   const current = readAdminApiToken();
-  if (current) return current;
+  if (current && !force) return current;
+  if (force) localStorage.removeItem(STORAGE_KEYS.adminApiToken);
   if (adminTokenRequestPromise) return adminTokenRequestPromise;
 
   adminTokenRequestPromise = (async () => {
@@ -479,7 +481,16 @@ async function apiJson(path, options = {}) {
       ? null
       : await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 401) localStorage.removeItem(STORAGE_KEYS.adminApiToken);
+      if (response.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.adminApiToken);
+        if (!options.__retriedAfterAuth) {
+          setAdminLoading(false);
+          const renewedToken = await requestAdminApiToken(true);
+          if (renewedToken) {
+            return apiJson(path, { ...options, __retriedAfterAuth: true });
+          }
+        }
+      }
       return {
         ok: false,
         status: response.status,
@@ -498,92 +509,42 @@ async function apiJson(path, options = {}) {
 async function loadAlimtalkMessagesFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicMessages = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk?ts=${timestamp}`, requestOptions);
-  if (publicMessages?.ok && Array.isArray(publicMessages.rows)) {
+  const result = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
+  if (result?.ok && Array.isArray(result.rows)) {
     messageSyncError = "";
-    return publicMessages;
+    return result;
   }
-
-  const localMessages = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
-  if (localMessages?.ok && Array.isArray(localMessages.rows)) {
-    messageSyncError = "";
-    return localMessages;
-  }
-
-  messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
-  return null;
+  messageSyncError = result?.message || "알림톡 기록을 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function loadCustomerQuotesFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicQuotes = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes?ts=${timestamp}`, requestOptions);
-  if (publicQuotes?.ok && Array.isArray(publicQuotes.rows)) {
+  const result = await apiJson(`/api/customer-quotes?ts=${timestamp}`, requestOptions);
+  if (result?.ok && Array.isArray(result.rows)) {
     customerQuoteSyncError = "";
-    return publicQuotes;
+    return result;
   }
-
-  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`, requestOptions);
-  if (localQuotes?.ok && Array.isArray(localQuotes.rows)) {
-    customerQuoteSyncError = "";
-    return localQuotes;
-  }
-
-  customerQuoteSyncError = "고객 견적을 서버에서 불러오지 못했습니다. 관리자 API와 노출용 API 연결 상태를 확인해주세요.";
-  return null;
+  customerQuoteSyncError = result?.message || "고객 견적을 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function loadSellerApplicationsFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicApplications = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications?ts=${timestamp}`, requestOptions);
-  if (publicApplications?.ok && Array.isArray(publicApplications.rows)) {
-    return publicApplications;
-  }
-
   return apiJson(`/api/seller-applications?ts=${timestamp}`, requestOptions);
 }
 
 async function loadApprovedSellersFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-
-  // 관리자용 API를 기준 데이터로 먼저 확인합니다. 노출용 API가 일시적으로
-  // 빈 목록을 반환해도 관리자 목록이 통째로 사라지지 않도록 두 결과를 병합합니다.
-  const [adminSellers, publicSellers] = await Promise.all([
-    apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions),
-    apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`, requestOptions),
-  ]);
-
-  const adminRows = adminSellers?.ok && Array.isArray(adminSellers.rows) ? adminSellers.rows : [];
-  const publicRows = publicSellers?.ok && Array.isArray(publicSellers.rows) ? publicSellers.rows : [];
-  const merged = new Map();
-
-  [...publicRows, ...adminRows].forEach((seller) => {
-    const key = String(seller?.sellerId || seller?.seller_id || seller?.id || "").trim();
-    if (!key) return;
-    merged.set(key, seller);
-  });
-
-  if (adminSellers?.ok || publicSellers?.ok) {
-    return {
-      ok: true,
-      rows: Array.from(merged.values()),
-      sources: {
-        admin: adminRows.length,
-        public: publicRows.length,
-      },
-    };
-  }
-
-  return adminSellers || publicSellers || null;
+  return apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions);
 }
 
 async function loadVisitStatsFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicStats = await apiJson(`${PUBLIC_API_BASE}/api/visit-stats?ts=${timestamp}`, requestOptions);
-  if (publicStats?.ok) return publicStats;
   return apiJson(`/api/visit-stats?ts=${timestamp}`, requestOptions);
 }
 
@@ -591,8 +552,6 @@ async function loadSellerAccessLogsFromServer(options = {}) {
   const timestamp = Date.now();
   const days = Math.min(365, Math.max(1, Number(options.days || sellerAccessDays?.value || 30) || 30));
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicLogs = await apiJson(`${PUBLIC_API_BASE}/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
-  if (publicLogs?.ok && Array.isArray(publicLogs.rows)) return publicLogs;
   return apiJson(`/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
 }
 
@@ -600,23 +559,14 @@ async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
   const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicTraining = await apiJson(`${PUBLIC_API_BASE}/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
-  if (publicTraining?.ok && Array.isArray(publicTraining.rows)) {
-    lplanSyncError = "";
-    lplanLastCheckedAt = new Date().toISOString();
-    return publicTraining;
-  }
-
-  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
-  if (localTraining?.ok && Array.isArray(localTraining.rows)) {
-    lplanSyncError = "";
-    lplanLastCheckedAt = new Date().toISOString();
-    return localTraining;
-  }
-
-  lplanSyncError = "엘플랜 동기화 데이터를 불러오지 못했습니다. 엘플랜 저장 API와 관리자 DB 연결을 확인해주세요.";
+  const result = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
   lplanLastCheckedAt = new Date().toISOString();
-  return null;
+  if (result?.ok && Array.isArray(result.rows)) {
+    lplanSyncError = "";
+    return result;
+  }
+  lplanSyncError = result?.message || "엘플랜 동기화 데이터를 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function forceLplanTrainingSync() {
@@ -694,7 +644,7 @@ async function loadAdminDataFromServer(options = {}) {
 }
 
 async function syncApplicationStatusToServer(applicationId, status, reviewMemo) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications/${encodeURIComponent(applicationId)}`, {
+  const result = await apiJson(`/api/seller-applications/${encodeURIComponent(applicationId)}`, {
     method: "PATCH",
     body: JSON.stringify({ status, reviewMemo }),
   });
@@ -708,14 +658,20 @@ async function syncApplicationStatusToServer(applicationId, status, reviewMemo) 
 }
 
 async function syncMessageStatusToServer(messageId, payload) {
-  await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+  if (!result?.ok) {
+    showToast(result?.message || "알림톡 상태 저장에 실패했습니다.");
+    return false;
+  }
+  if (result.row) updateMessage(messageId, (message) => Object.assign(message, result.row));
+  return true;
 }
 
 async function resendMessage(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
     method: "POST",
   });
   if (result?.row) {
@@ -728,7 +684,7 @@ async function resendMessage(messageId) {
 }
 
 async function refreshMessageStatus(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
     method: "POST",
   });
   if (result?.row) {
@@ -741,7 +697,7 @@ async function refreshMessageStatus(messageId) {
 }
 
 async function deleteMessage(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
     method: "DELETE",
   });
   if (!result?.ok) return;
@@ -781,7 +737,7 @@ function setApprovedSellers(rows) {
 }
 
 async function syncApprovedSellerPasswordToServer(sellerId, password) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ password }),
   });
@@ -797,7 +753,7 @@ async function syncApprovedSellerPasswordToServer(sellerId, password) {
 }
 
 async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ managerPosition }),
   });
@@ -816,7 +772,7 @@ async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
 }
 
 async function syncApprovedSellerUpdateToServer(sellerId, payload) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -833,7 +789,7 @@ async function syncApprovedSellerUpdateToServer(sellerId, payload) {
 }
 
 async function syncApprovedSellerDeleteToServer(sellerId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
   });
 
@@ -935,10 +891,7 @@ async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
     body: JSON.stringify({ reason }),
   };
 
-  let result = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes/${encodedId}`, request);
-  if (!result?.ok) {
-    result = await apiJson(`/api/customer-quotes/${encodedId}`, request);
-  }
+  const result = await apiJson(`/api/customer-quotes/${encodedId}`, request);
 
   if (!result?.ok) {
     showToast(result?.message || "고객 견적 삭제에 실패했습니다.");
@@ -1126,7 +1079,7 @@ function showToast(message) {
 }
 
 async function queueAlimtalk(message) {
-  const serverResult = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk`, {
+  const serverResult = await apiJson(`/api/alimtalk`, {
     method: "POST",
     body: JSON.stringify(message),
   });
@@ -1888,11 +1841,6 @@ async function saveApprovedSellerPosition(sellerId) {
   const seller = getApprovedSellers().find((row) => row.id === sellerId);
   if (!input || !seller) return;
   const managerPosition = input.value.trim();
-  const rows = getApprovedSellers();
-  const target = rows.find((row) => row.id === sellerId);
-  if (target) target.managerPosition = managerPosition;
-  setApprovedSellers(rows);
-  renderAll();
   const ok = await syncApprovedSellerPositionToServer(sellerId, managerPosition);
   showToast(ok ? "판매자 직책을 변경했습니다." : "판매자 직책 변경에 실패했습니다.");
 }
@@ -1902,8 +1850,6 @@ async function deleteApprovedSeller(sellerId) {
   if (!seller) return;
   const confirmed = window.confirm(`${sellerName(seller) || seller.sellerId} 판매자를 삭제할까요?\n삭제하면 해당 아이디로 판매자 로그인을 할 수 없습니다.`);
   if (!confirmed) return;
-  setApprovedSellers(getApprovedSellers().filter((row) => row.id !== sellerId));
-  renderAll();
   const ok = await syncApprovedSellerDeleteToServer(sellerId);
   showToast(ok ? "승인 판매자를 삭제했습니다." : "승인 판매자 삭제에 실패했습니다.");
 }
@@ -2244,6 +2190,19 @@ sellerAccessDays?.addEventListener("change", async () => {
     }
   } finally {
     setAdminLoading(false);
+  }
+});
+
+adminAuthBtn?.addEventListener("click", async () => {
+  const token = await requestAdminApiToken(true);
+  if (!token) return;
+  const status = await apiJson("/api/auth-status", { silent: true });
+  showToast(status?.ok
+    ? `관리자 인증이 완료되었습니다. (${status.tokenSource === "cloudflare-secret" ? "Cloudflare Secret" : "기본 보안 토큰"})`
+    : status?.message || "관리자 인증에 실패했습니다.");
+  if (status?.ok) {
+    await loadAdminDataFromServer();
+    renderAll();
   }
 });
 

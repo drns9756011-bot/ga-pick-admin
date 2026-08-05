@@ -1,0 +1,6 @@
+픽견적 관리자 API 토큰
+
+GAPICK-8hsPzbEXfpTasO0h7J8MfSjx1tDnZ4Fna0T38TTu9Yc
+
+관리자 페이지에서 최초 1회 또는 "관리자 인증" 버튼을 눌러 입력하세요.
+이 토큰은 외부에 공개하지 마세요.

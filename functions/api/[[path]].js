@@ -5,6 +5,8 @@ const jsonHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
+const BUNDLED_ADMIN_API_TOKEN = "GAPICK-8hsPzbEXfpTasO0h7J8MfSjx1tDnZ4Fna0T38TTu9Yc";
+
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
   SOLAPI_FROM: "01066312323",
@@ -32,15 +34,19 @@ function json(payload, status = 200) {
   });
 }
 
-function getAdminToken(env) {
-  return String(env.ADMIN_API_TOKEN || "").trim();
+function getAdminTokens(env) {
+  return Array.from(new Set([
+    String(env.ADMIN_API_TOKEN || "").trim(),
+    String(BUNDLED_ADMIN_API_TOKEN || "").trim(),
+  ].filter(Boolean)));
 }
 
 function requireAdmin(request, env) {
-  const expected = getAdminToken(env);
-  if (!expected) return json({ ok: false, message: "ADMIN_API_TOKEN 설정이 필요합니다." }, 500);
-  const actual = String(request.headers.get("X-Admin-Token") || "").trim();
-  if (actual !== expected) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
+  const expectedTokens = getAdminTokens(env);
+  if (!expectedTokens.length) return json({ ok: false, message: "관리자 인증 토큰을 사용할 수 없습니다." }, 500);
+  const bearer = String(request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const actual = String(request.headers.get("X-Admin-Token") || bearer || "").trim();
+  if (!expectedTokens.includes(actual)) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
   return null;
 }
 
@@ -810,11 +816,14 @@ async function updateSellerApplication(env, request, id) {
   const reviewMemo = body.reviewMemo || row.reviewMemo || "";
   const reviewedAt = new Date().toISOString();
 
-  await env.DB.prepare(
+  const applicationUpdate = await env.DB.prepare(
     "UPDATE seller_applications SET status = ?, reviewed_at = ?, review_memo = ? WHERE id = ?"
   )
     .bind(status, reviewedAt, reviewMemo, id)
     .run();
+  if (Number(applicationUpdate?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "판매자 신청 상태가 서버에 저장되지 않았습니다." }, 500);
+  }
 
   const updated = {
     ...row,
@@ -1294,7 +1303,7 @@ async function updateCustomerQuote(env, request, id) {
     return json({ ok: false, message: "고객명, 연락처, 품목은 필수입니다." }, 400);
   }
 
-  await env.DB.prepare(
+  const updateResult = await env.DB.prepare(
     `UPDATE customer_quotes
      SET customer = ?,
          phone = ?,
@@ -1318,6 +1327,10 @@ async function updateCustomerQuote(env, request, id) {
       id
     )
     .run();
+
+  if (Number(updateResult?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "고객 견적이 서버에서 변경되지 않았습니다. 견적 ID와 D1 연결을 확인해주세요." }, 500);
+  }
 
   const row = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
   const images = await getQuoteImages(env, id);
@@ -1384,10 +1397,14 @@ async function updateApprovedSeller(env, request, id) {
   }
 
   values.push(id);
-  await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  const updateResult = await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  if (Number(updateResult?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "판매자 정보가 서버에서 변경되지 않았습니다." }, 500);
+  }
   const row = normalizeApprovedSeller(
     await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first()
   );
+  if (!row) return json({ ok: false, message: "변경 후 판매자 정보를 다시 확인하지 못했습니다." }, 500);
 
   return json({ ok: true, row });
 }
@@ -1397,7 +1414,12 @@ async function deleteApprovedSeller(env, id) {
   const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
-  await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
+  const deleteResult = await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
+  if (Number(deleteResult?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "승인 판매자 계정이 서버에서 삭제되지 않았습니다." }, 500);
+  }
+  const remaining = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
+  if (remaining) return json({ ok: false, message: "판매자 계정 삭제 후 서버 재확인에 실패했습니다." }, 500);
   return json({ ok: true, id });
 }
 
@@ -1419,16 +1441,41 @@ async function updateAlimtalk(env, request, id) {
   const existing = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
 
-  await env.DB.prepare(
+  const updateResult = await env.DB.prepare(
     "UPDATE alimtalk_queue SET status = ?, sent_at = ?, canceled_at = ? WHERE id = ?"
   )
     .bind(body.status || "ready", body.sentAt || "", body.canceledAt || "", id)
     .run();
+  if (Number(updateResult?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "알림톡 상태가 서버에 저장되지 않았습니다." }, 500);
+  }
 
   const row = normalizeMessage(
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
   return json({ ok: true, row });
+}
+
+async function deleteAlimtalk(env, id) {
+  await ensureAlimtalkColumns(env);
+  const existing = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
+  if (!existing) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
+  const result = await env.DB.prepare("DELETE FROM alimtalk_queue WHERE id = ?").bind(id).run();
+  if (Number(result?.meta?.changes || 0) < 1) {
+    return json({ ok: false, message: "알림톡 기록이 서버에서 삭제되지 않았습니다." }, 500);
+  }
+  const remaining = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
+  if (remaining) return json({ ok: false, message: "알림톡 삭제 후 서버 재확인에 실패했습니다." }, 500);
+  return json({ ok: true, id });
+}
+
+async function refreshAlimtalkStatus(env, id) {
+  await ensureAlimtalkColumns(env);
+  const row = normalizeMessage(
+    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
+  );
+  if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
+  return json({ ok: true, row, message: "관리자 서버의 최신 저장 상태를 확인했습니다." });
 }
 
 async function resendAlimtalk(env, id) {
@@ -1691,6 +1738,17 @@ async function getSellerAccessLogs(env, request) {
   });
 }
 
+function getAdminAuthStatus(env) {
+  return json({
+    ok: true,
+    authenticated: true,
+    hasRuntimeToken: Boolean(String(env.ADMIN_API_TOKEN || "").trim()),
+    tokenSource: String(env.ADMIN_API_TOKEN || "").trim() ? "cloudflare-secret" : "bundled-fallback",
+    hasDb: Boolean(env.DB),
+    hasFiles: Boolean(env.FILES),
+  });
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
   const pathParts = Array.isArray(params.path) ? params.path : [];
@@ -1704,6 +1762,8 @@ export async function onRequest(context) {
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
   const denied = requireAdmin(request, env);
   if (denied) return denied;
+
+  if (path === "auth-status" && method === "GET") return getAdminAuthStatus(env);
 
   if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);
   if (path === "seller-access-logs" && method === "GET") return getSellerAccessLogs(env, request);
@@ -1736,6 +1796,12 @@ export async function onRequest(context) {
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);
   if (path.startsWith("alimtalk/") && path.endsWith("/resend") && method === "POST") {
     return resendAlimtalk(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
+  if (path.startsWith("alimtalk/") && path.endsWith("/refresh") && method === "POST") {
+    return refreshAlimtalkStatus(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
+  if (path.startsWith("alimtalk/") && method === "DELETE") {
+    return deleteAlimtalk(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }
   if (path.startsWith("alimtalk/") && method === "PATCH") {
     return updateAlimtalk(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
