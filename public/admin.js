@@ -189,7 +189,10 @@ function applyAdminPageView() {
   const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
   document.body.dataset.adminPage = pageKey;
   document.title = `픽견적 관리자 · ${config.title}`;
-  if (adminShell) adminShell.id = pageKey;
+  if (adminShell) {
+    adminShell.id = "adminShell";
+    adminShell.dataset.page = pageKey;
+  }
   if (adminHeaderTitle) adminHeaderTitle.textContent = config.heading;
   if (adminHeaderCopy) adminHeaderCopy.textContent = config.copy;
 
