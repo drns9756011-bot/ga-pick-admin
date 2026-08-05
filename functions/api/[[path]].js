@@ -664,12 +664,143 @@ async function queueAlimtalk(env, message) {
   return { id, ...result };
 }
 
+
+async function tableExists(env, tableName) {
+  const row = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
+  ).bind(String(tableName || "")).first();
+  return Boolean(row?.name);
+}
+
+async function ensureSellerTablesAndColumns(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS seller_applications (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_at TEXT DEFAULT '',
+      reviewed_at TEXT DEFAULT '',
+      review_memo TEXT DEFAULT '',
+      seller_id TEXT NOT NULL,
+      password TEXT DEFAULT '',
+      channel TEXT DEFAULT '',
+      branch TEXT DEFAULT '',
+      branch_region TEXT DEFAULT '',
+      manager TEXT DEFAULT '',
+      manager_position TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      card_image TEXT DEFAULT '',
+      card_image_key TEXT DEFAULT '',
+      memo TEXT DEFAULT '',
+      consent_json TEXT DEFAULT '{}'
+    )`
+  ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS approved_sellers (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'approved',
+      seller_id TEXT NOT NULL UNIQUE,
+      password TEXT DEFAULT '',
+      channel TEXT DEFAULT '',
+      branch TEXT DEFAULT '',
+      branch_region TEXT DEFAULT '',
+      manager TEXT DEFAULT '',
+      manager_position TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      card_image TEXT DEFAULT '',
+      card_image_key TEXT DEFAULT '',
+      memo TEXT DEFAULT '',
+      consent_json TEXT DEFAULT '{}',
+      requested_at TEXT DEFAULT '',
+      reviewed_at TEXT DEFAULT '',
+      review_memo TEXT DEFAULT '',
+      approved_at TEXT DEFAULT ''
+    )`
+  ).run();
+
+  const statements = [
+    "ALTER TABLE seller_applications ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE seller_applications ADD COLUMN requested_at TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN reviewed_at TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN review_memo TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN seller_id TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN password TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN channel TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN branch TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN branch_region TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN manager TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN manager_position TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN phone TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN card_image TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN card_image_key TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN memo TEXT DEFAULT ''",
+    "ALTER TABLE seller_applications ADD COLUMN consent_json TEXT DEFAULT '{}'",
+    "ALTER TABLE approved_sellers ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'",
+    "ALTER TABLE approved_sellers ADD COLUMN seller_id TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN password TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN channel TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN branch TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN branch_region TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN manager TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN manager_position TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN phone TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN card_image TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN card_image_key TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN memo TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN consent_json TEXT DEFAULT '{}'",
+    "ALTER TABLE approved_sellers ADD COLUMN requested_at TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN reviewed_at TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN review_memo TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN approved_at TEXT DEFAULT ''",
+  ];
+
+  for (const statement of statements) {
+    try {
+      await env.DB.prepare(statement).run();
+    } catch (error) {
+      // 이미 존재하는 컬럼은 그대로 사용합니다.
+    }
+  }
+
+  try {
+    await env.DB.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_approved_sellers_seller_id ON approved_sellers(seller_id)"
+    ).run();
+  } catch (error) {
+    // 과거 중복 계정이 있으면 목록 조회는 계속 진행합니다.
+  }
+}
+
+async function tablesWithColumn(env, columnName) {
+  const tables = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+  ).all();
+  const matched = [];
+
+  for (const row of tables.results || []) {
+    const name = String(row.name || "");
+    if (!/^[A-Za-z0-9_]+$/.test(name)) continue;
+    try {
+      const info = await env.DB.prepare(`PRAGMA table_info("${name}")`).all();
+      if ((info.results || []).some((column) => String(column.name || "") === columnName)) {
+        matched.push(name);
+      }
+    } catch (error) {
+      // 읽을 수 없는 보조 테이블은 건너뜁니다.
+    }
+  }
+
+  return matched;
+}
+
 async function getSellerApplications(env) {
+  await ensureSellerTablesAndColumns(env);
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
 }
 
 async function updateSellerApplication(env, request, id) {
+  await ensureSellerTablesAndColumns(env);
   const body = await request.json();
   const rawRow = await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first();
   const row = normalizeSellerApplication(rawRow);
@@ -765,56 +896,68 @@ async function updateSellerApplication(env, request, id) {
 }
 
 async function repairMissingApprovedSellers(env) {
+  await ensureSellerTablesAndColumns(env);
   const missing = await env.DB.prepare(
     `SELECT a.*
        FROM seller_applications a
        LEFT JOIN approved_sellers s ON s.seller_id = a.seller_id
-      WHERE a.status = 'approved'
+      WHERE LOWER(TRIM(COALESCE(a.status, ''))) IN ('approved', 'active')
         AND s.seller_id IS NULL`
   ).all();
 
+  let repairedCount = 0;
   for (const row of missing.results || []) {
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO approved_sellers
-        (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
-         card_image, card_image_key, memo, consent_json, requested_at, reviewed_at, review_memo, approved_at)
-       VALUES (?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        row.id,
-        row.seller_id,
-        await protectStoredPassword(row.password),
-        row.channel || "",
-        row.branch || "",
-        row.branch_region || "",
-        row.manager || "",
-        row.manager_position || "",
-        row.phone || "",
-        row.card_image || "",
-        row.card_image_key || "",
-        row.memo || "",
-        row.consent_json || "{}",
-        row.requested_at || "",
-        row.reviewed_at || "",
-        row.review_memo || "",
-        row.reviewed_at || row.requested_at || new Date().toISOString()
+    try {
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO approved_sellers
+          (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
+           card_image, card_image_key, memo, consent_json, requested_at, reviewed_at, review_memo, approved_at)
+         VALUES (?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run();
+        .bind(
+          row.id || createId("approved-seller"),
+          row.seller_id || "",
+          await protectStoredPassword(row.password || ""),
+          row.channel || "",
+          row.branch || "",
+          row.branch_region || "",
+          row.manager || "",
+          row.manager_position || "",
+          row.phone || "",
+          row.card_image || "",
+          row.card_image_key || "",
+          row.memo || "",
+          row.consent_json || "{}",
+          row.requested_at || "",
+          row.reviewed_at || "",
+          row.review_memo || "",
+          row.reviewed_at || row.requested_at || new Date().toISOString()
+        )
+        .run();
+      repairedCount += 1;
+    } catch (error) {
+      console.warn("승인 판매자 자동 복구 실패", row.seller_id, error);
+    }
   }
 
-  return Number(missing.results?.length || 0);
+  return repairedCount;
 }
 
 async function getApprovedSellers(env) {
+  await ensureSellerTablesAndColumns(env);
   const repairedCount = await repairMissingApprovedSellers(env);
   const result = await env.DB.prepare(
-    "SELECT * FROM approved_sellers WHERE status = 'approved' ORDER BY approved_at DESC"
+    `SELECT * FROM approved_sellers
+      WHERE LOWER(TRIM(COALESCE(status, 'approved'))) NOT IN ('deleted', 'rejected', 'disabled')
+      ORDER BY CASE WHEN approved_at = '' THEN 1 ELSE 0 END, approved_at DESC, rowid DESC`
   ).all();
-  return json({
-    ok: true,
-    rows: result.results.map(normalizeApprovedSeller),
-    repairedCount,
-  });
+
+  const rows = (result.results || []).map((row) => normalizeApprovedSeller({
+    ...row,
+    status: row.status || "approved",
+  }));
+
+  return json({ ok: true, rows, repairedCount });
 }
 
 async function ensureDeletedQuoteLogTable(env) {
@@ -1056,42 +1199,86 @@ async function deleteCustomerQuote(env, request, id) {
   const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
   if (!quote) return json({ ok: false, message: "삭제할 고객 견적을 찾을 수 없습니다." }, 404);
 
-  const images = await getQuoteImages(env, id);
-  const objectKeys = Array.from(
-    new Set(
-      [
-        quote.thumbnail_image_key || "",
-        ...images.map((image) => image.object_key || ""),
-      ].filter(Boolean)
+  const objectKeys = new Set();
+  if (quote.thumbnail_image_key) objectKeys.add(String(quote.thumbnail_image_key));
+
+  if (await tableExists(env, "quote_images")) {
+    try {
+      const images = await env.DB.prepare("SELECT object_key FROM quote_images WHERE quote_id = ?").bind(id).all();
+      for (const image of images.results || []) {
+        if (image.object_key) objectKeys.add(String(image.object_key));
+      }
+    } catch (error) {
+      console.warn("삭제 대상 이미지 조회 실패", error);
+    }
+  }
+
+  const relatedTables = (await tablesWithColumn(env, "quote_id"))
+    .filter((name) => !["customer_quotes", "deleted_quote_logs"].includes(name));
+  const priority = new Map([
+    ["reviews", 0],
+    ["quote_images", 1],
+    ["bids", 2],
+  ]);
+  relatedTables.sort((a, b) => (priority.get(a) ?? 20) - (priority.get(b) ?? 20));
+
+  const statements = relatedTables.map((tableName) =>
+    env.DB.prepare(`DELETE FROM "${tableName}" WHERE quote_id = ?`).bind(id)
+  );
+
+  if (await tableExists(env, "alimtalk_queue")) {
+    statements.push(env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id));
+  }
+
+  statements.push(env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id));
+  const deletedAt = new Date().toISOString();
+  statements.push(
+    env.DB.prepare(
+      `INSERT INTO deleted_quote_logs
+        (id, quote_id, quote_number, customer, phone, reason, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      createId("deleted-quote"),
+      quote.id,
+      quote.quote_number || "",
+      quote.customer || "",
+      quote.phone || "",
+      reason,
+      deletedAt
     )
   );
+
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    console.error("고객 견적 일괄 삭제 실패", error);
+    return json({
+      ok: false,
+      message: `고객 견적 삭제 중 서버 오류가 발생했습니다. ${error?.message || ""}`.trim(),
+    }, 500);
+  }
+
+  const remaining = await env.DB.prepare("SELECT id FROM customer_quotes WHERE id = ?").bind(id).first();
+  if (remaining) {
+    return json({ ok: false, message: "서버에서 고객 견적이 완전히 삭제되지 않았습니다." }, 500);
+  }
 
   if (env.FILES) {
     for (const key of objectKeys) {
       try {
         await env.FILES.delete(key);
       } catch (error) {
-        // Continue deleting database records even if an object was already removed.
+        console.warn("삭제된 견적의 R2 이미지 정리 실패", key, error);
       }
     }
   }
 
-  const deletedAt = new Date().toISOString();
-  await env.DB.prepare(
-    `INSERT INTO deleted_quote_logs
-      (id, quote_id, quote_number, customer, phone, reason, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(createId("deleted-quote"), quote.id, quote.quote_number || "", quote.customer, quote.phone, reason, deletedAt)
-    .run();
-
-  await env.DB.prepare("DELETE FROM reviews WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM bids WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id).run();
-
-  return json({ ok: true, id, deletedAt });
+  return json({
+    ok: true,
+    id,
+    deletedAt,
+    deletedRelatedTables: relatedTables,
+  });
 }
 
 async function updateCustomerQuote(env, request, id) {
@@ -1138,6 +1325,7 @@ async function updateCustomerQuote(env, request, id) {
 }
 
 async function updateApprovedSeller(env, request, id) {
+  await ensureSellerTablesAndColumns(env);
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
@@ -1205,6 +1393,7 @@ async function updateApprovedSeller(env, request, id) {
 }
 
 async function deleteApprovedSeller(env, id) {
+  await ensureSellerTablesAndColumns(env);
   const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
