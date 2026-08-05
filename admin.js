@@ -528,12 +528,36 @@ async function loadSellerApplicationsFromServer(options = {}) {
 async function loadApprovedSellersFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicSellers = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`, requestOptions);
-  if (publicSellers?.ok && Array.isArray(publicSellers.rows)) {
-    return publicSellers;
+
+  // 관리자용 API를 기준 데이터로 먼저 확인합니다. 노출용 API가 일시적으로
+  // 빈 목록을 반환해도 관리자 목록이 통째로 사라지지 않도록 두 결과를 병합합니다.
+  const [adminSellers, publicSellers] = await Promise.all([
+    apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions),
+    apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`, requestOptions),
+  ]);
+
+  const adminRows = adminSellers?.ok && Array.isArray(adminSellers.rows) ? adminSellers.rows : [];
+  const publicRows = publicSellers?.ok && Array.isArray(publicSellers.rows) ? publicSellers.rows : [];
+  const merged = new Map();
+
+  [...publicRows, ...adminRows].forEach((seller) => {
+    const key = String(seller?.sellerId || seller?.seller_id || seller?.id || "").trim();
+    if (!key) return;
+    merged.set(key, seller);
+  });
+
+  if (adminSellers?.ok || publicSellers?.ok) {
+    return {
+      ok: true,
+      rows: Array.from(merged.values()),
+      sources: {
+        admin: adminRows.length,
+        public: publicRows.length,
+      },
+    };
   }
 
-  return apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions);
+  return adminSellers || publicSellers || null;
 }
 
 async function loadVisitStatsFromServer(options = {}) {
@@ -794,6 +818,70 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
   await loadAdminDataFromServer();
   renderAll();
   return true;
+}
+
+function readAdminFileAsDataUrl(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => resolve(""));
+    reader.readAsDataURL(file);
+  });
+}
+
+function convertAdminImageToJpeg(dataUrl, maxWidth = 1800, quality = 0.86) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const ratio = Math.min(1, maxWidth / Math.max(1, image.width));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * ratio));
+        canvas.height = Math.max(1, Math.round(image.height * ratio));
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) return resolve("");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (error) {
+        resolve("");
+      }
+    };
+    image.onerror = () => resolve("");
+    image.src = dataUrl;
+  });
+}
+
+async function replaceCustomerQuoteImage(quoteId) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+  input.multiple = true;
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files || []).slice(0, 4);
+    if (!files.length) return;
+    const raw = await Promise.all(files.map(readAdminFileAsDataUrl));
+    const converted = await Promise.all(raw.map((dataUrl) => convertAdminImageToJpeg(dataUrl)));
+    if (converted.some((item) => !item)) {
+      showToast("이미지를 변환하지 못했습니다. JPG 또는 PNG 파일을 선택해주세요.");
+      return;
+    }
+    const thumbnailImage = await convertAdminImageToJpeg(converted[0], 720, 0.72);
+    const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}/images`, {
+      method: "POST",
+      body: JSON.stringify({ images: converted, thumbnailImage }),
+    });
+    if (!result?.ok) {
+      showToast(result?.message || "견적 이미지 교체에 실패했습니다.");
+      return;
+    }
+    const quotes = getCustomerQuotes().map((quote) => quote.id === quoteId ? { ...quote, ...result.row } : quote);
+    writeStorageArray(STORAGE_KEYS.customerQuotes, quotes);
+    renderAll();
+    showToast("견적 이미지를 교체했습니다.");
+  }, { once: true });
+  input.click();
 }
 
 async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
@@ -1486,7 +1574,7 @@ function renderCustomerQuotes() {
       return `
         <article class="quote-admin-card">
           <div class="quote-admin-thumb">
-            ${quote.thumbnailImage || quote.image ? `<img src="${escapeHTML(quote.thumbnailImage || quote.image)}" alt="대표 견적 이미지" />` : `<span>이미지 없음</span>`}
+            ${quote.image || quote.thumbnailImage ? `<img src="${escapeHTML(quote.image || quote.thumbnailImage)}" alt="대표 견적 이미지" data-admin-quote-image data-fallback-src="${escapeHTML(quote.thumbnailImage || "")}" />` : `<span>이미지 없음</span>`}
           </div>
           <div class="quote-admin-body">
             <div class="quote-admin-head">
@@ -1509,6 +1597,7 @@ function renderCustomerQuotes() {
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
             ${renderQuoteBidSummary(quote)}
             <div class="quote-admin-actions">
+              <button class="plain-btn small-btn" type="button" data-replace-customer-quote-image="${escapeHTML(quote.id)}">견적 이미지 교체</button>
               <button class="plain-btn small-btn" type="button" data-edit-customer-quote="${escapeHTML(quote.id)}">정보 수정</button>
               <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">견적 삭제</button>
             </div>
@@ -1958,6 +2047,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const replaceCustomerQuoteImageButton = event.target.closest("[data-replace-customer-quote-image]");
+  if (replaceCustomerQuoteImageButton) {
+    replaceCustomerQuoteImage(replaceCustomerQuoteImageButton.dataset.replaceCustomerQuoteImage);
+    return;
+  }
+
   const deleteCustomerQuoteButton = event.target.closest("[data-delete-customer-quote]");
   if (deleteCustomerQuoteButton) {
     deleteCustomerQuote(deleteCustomerQuoteButton.dataset.deleteCustomerQuote);
@@ -2085,3 +2180,21 @@ loadAdminDataFromServer().finally(renderAll);
 
 
 
+
+
+document.addEventListener(
+  "error",
+  (event) => {
+    const image = event.target?.closest?.("img[data-admin-quote-image]");
+    if (!image) return;
+    const fallback = image.dataset.fallbackSrc || "";
+    if (fallback && image.src !== new URL(fallback, window.location.href).href && image.dataset.fallbackTried !== "true") {
+      image.dataset.fallbackTried = "true";
+      image.src = fallback;
+      return;
+    }
+    const holder = image.closest(".quote-admin-thumb");
+    if (holder) holder.innerHTML = "<span>이미지 형식을 표시하지 못했습니다.</span>";
+  },
+  true
+);

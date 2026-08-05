@@ -205,10 +205,25 @@ function parseJson(value, fallback) {
   }
 }
 
+function storedFileUrl(objectKey, fallbackUrl = "") {
+  const key = String(objectKey || "").trim();
+  if (key) {
+    return `/api/files/${key.split("/").map((part) => encodeURIComponent(part)).join("/")}`;
+  }
+  return String(fallbackUrl || "");
+}
+
+function normalizedStoredImage(image) {
+  if (!image) return { url: "" };
+  return { ...image, url: storedFileUrl(image.object_key || image.objectKey, image.url || "") };
+}
+
 function normalizeCustomerQuote(row, images = []) {
   if (!row) return null;
-  const fullImages = images.filter((image) => image.image_type !== "thumbnail");
-  const displayImages = fullImages.length ? fullImages : row.thumbnail_image ? [{ url: row.thumbnail_image }] : [];
+  const normalizedImages = images.map(normalizedStoredImage);
+  const fullImages = normalizedImages.filter((image) => image.image_type !== "thumbnail");
+  const thumbnailUrl = storedFileUrl(row.thumbnail_image_key, row.thumbnail_image || "");
+  const displayImages = fullImages.length ? fullImages : thumbnailUrl ? [{ url: thumbnailUrl }] : [];
   const bids = Array.isArray(row.bids) ? row.bids : [];
   return {
     id: row.id,
@@ -227,14 +242,14 @@ function normalizeCustomerQuote(row, images = []) {
     bidCount: Number(row.bid_count || bids.length || 0),
     bids,
     saleCompletedAt: row.sale_completed_at || "",
-    thumbnailImage: row.thumbnail_image || "",
+    thumbnailImage: thumbnailUrl,
     thumbnailImageKey: row.thumbnail_image_key || "",
     quoteExpiresAt: row.quote_expires_at || "",
     fullImagesExpiresAt: row.full_images_expires_at || "",
     personalExpiresAt: row.personal_expires_at || "",
     createdAt: row.created_at || "",
     consent: parseJson(row.consent_json, {}),
-    image: displayImages[0]?.url || row.thumbnail_image || "",
+    image: displayImages[0]?.url || thumbnailUrl,
     images: displayImages.map((image) => image.url),
   };
 }
@@ -277,21 +292,6 @@ function normalizeBid(row) {
   };
 }
 
-function dataUrlInfo(dataUrl) {
-  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return null;
-  const contentType = match[1];
-  const base64 = match[2];
-  const ext = {
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/gif": "gif",
-  }[contentType] || "bin";
-  return { contentType, base64, ext };
-}
-
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -301,15 +301,59 @@ function base64ToArrayBuffer(base64) {
   return bytes;
 }
 
+function detectFileContentType(bytes, declaredType = "") {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const ascii = (start, length) => String.fromCharCode(...data.slice(start, start + length));
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  if (data.length >= 8 && data[0] === 0x89 && ascii(1, 3) === "PNG") return "image/png";
+  if (data.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return "image/webp";
+  if (data.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (data.length >= 5 && ascii(0, 5) === "%PDF-") return "application/pdf";
+  if (data.length >= 12 && ascii(4, 4) === "ftyp") {
+    const brand = ascii(8, 4).toLowerCase();
+    if (["heic", "heix", "hevc", "hevx", "heif", "mif1", "msf1"].includes(brand)) return "image/heic";
+    if (["avif", "avis"].includes(brand)) return "image/avif";
+  }
+  return String(declaredType || "application/octet-stream").toLowerCase();
+}
+
+function extensionForContentType(contentType) {
+  return {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/avif": "avif",
+    "application/pdf": "pdf",
+  }[contentType] || "bin";
+}
+
+function isBrowserSafeQuoteImageType(contentType) {
+  return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(String(contentType || "").toLowerCase());
+}
+
+function dataUrlInfo(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const declaredType = String(match[1] || "").toLowerCase();
+  const base64 = match[2];
+  const bytes = base64ToArrayBuffer(base64);
+  const contentType = detectFileContentType(bytes, declaredType);
+  return { contentType, declaredType, base64, bytes, ext: extensionForContentType(contentType) };
+}
+
 async function saveDataUrlToR2(env, dataUrl, prefix, id) {
   const info = dataUrlInfo(dataUrl);
-  if (!info || !env.FILES) return { url: dataUrl || "", key: "" };
+  if (!info || !env.FILES) return { url: dataUrl || "", key: "", contentType: info?.contentType || "" };
 
   const key = `${prefix}/${id}.${info.ext}`;
-  await env.FILES.put(key, base64ToArrayBuffer(info.base64), {
+  await env.FILES.put(key, info.bytes, {
     httpMetadata: { contentType: info.contentType },
   });
-  return { key, url: `/api/files/${key}` };
+  return { key, url: `/api/files/${key}`, contentType: info.contentType };
 }
 
 async function ensureAlimtalkColumns(env) {
@@ -720,9 +764,57 @@ async function updateSellerApplication(env, request, id) {
   return json({ ok: true, row: updated });
 }
 
+async function repairMissingApprovedSellers(env) {
+  const missing = await env.DB.prepare(
+    `SELECT a.*
+       FROM seller_applications a
+       LEFT JOIN approved_sellers s ON s.seller_id = a.seller_id
+      WHERE a.status = 'approved'
+        AND s.seller_id IS NULL`
+  ).all();
+
+  for (const row of missing.results || []) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO approved_sellers
+        (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
+         card_image, card_image_key, memo, consent_json, requested_at, reviewed_at, review_memo, approved_at)
+       VALUES (?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        row.id,
+        row.seller_id,
+        await protectStoredPassword(row.password),
+        row.channel || "",
+        row.branch || "",
+        row.branch_region || "",
+        row.manager || "",
+        row.manager_position || "",
+        row.phone || "",
+        row.card_image || "",
+        row.card_image_key || "",
+        row.memo || "",
+        row.consent_json || "{}",
+        row.requested_at || "",
+        row.reviewed_at || "",
+        row.review_memo || "",
+        row.reviewed_at || row.requested_at || new Date().toISOString()
+      )
+      .run();
+  }
+
+  return Number(missing.results?.length || 0);
+}
+
 async function getApprovedSellers(env) {
-  const result = await env.DB.prepare("SELECT * FROM approved_sellers ORDER BY approved_at DESC").all();
-  return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
+  const repairedCount = await repairMissingApprovedSellers(env);
+  const result = await env.DB.prepare(
+    "SELECT * FROM approved_sellers WHERE status = 'approved' ORDER BY approved_at DESC"
+  ).all();
+  return json({
+    ok: true,
+    rows: result.results.map(normalizeApprovedSeller),
+    repairedCount,
+  });
 }
 
 async function ensureDeletedQuoteLogTable(env) {
@@ -871,6 +963,85 @@ async function getLplanTrainingQuotes(env, request) {
     },
     rows: (result.results || []).map(normalizeLplanTrainingQuote),
   });
+}
+
+async function replaceCustomerQuoteImages(env, request, id) {
+  await ensureCustomerQuoteColumns(env);
+  const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
+  if (!quote) return json({ ok: false, message: "고객 견적을 찾을 수 없습니다." }, 404);
+  if (!env.FILES) return json({ ok: false, message: "R2 이미지 저장소 연결이 필요합니다." }, 500);
+
+  const body = await request.json();
+  const images = Array.isArray(body.images) ? body.images.slice(0, 4).filter(Boolean) : [];
+  if (!images.length) return json({ ok: false, message: "교체할 견적서 이미지를 선택해주세요." }, 400);
+
+  const invalid = images.find((dataUrl) => {
+    const info = dataUrlInfo(dataUrl);
+    return !info || !isBrowserSafeQuoteImageType(info.contentType);
+  });
+  if (invalid) {
+    return json({ ok: false, message: "JPG, PNG 또는 WebP 이미지만 등록할 수 있습니다." }, 415);
+  }
+
+  const thumbnailDataUrl = body.thumbnailImage || images[0];
+  const newKeys = [];
+  let thumbnail;
+  const originals = [];
+  try {
+    thumbnail = await saveDataUrlToR2(env, thumbnailDataUrl, "quote-thumbnails", `${id}-thumb-${Date.now()}`);
+    if (!thumbnail.key) throw new Error("대표 이미지 저장에 실패했습니다.");
+    newKeys.push(thumbnail.key);
+    for (let index = 0; index < images.length; index += 1) {
+      const saved = await saveDataUrlToR2(env, images[index], "quote-originals", `${id}-${Date.now()}-${index + 1}`);
+      if (!saved.key) throw new Error(`견적서 이미지 ${index + 1} 저장에 실패했습니다.`);
+      originals.push(saved);
+      newKeys.push(saved.key);
+    }
+  } catch (error) {
+    await Promise.all(newKeys.map(async (key) => { try { await env.FILES.delete(key); } catch (_) {} }));
+    return json({ ok: false, message: error?.message || "이미지 저장에 실패했습니다." }, 500);
+  }
+
+  const oldImages = await env.DB.prepare("SELECT object_key FROM quote_images WHERE quote_id = ?").bind(id).all();
+  const now = new Date();
+  const createdAt = now.toISOString();
+  const fullExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const personalExpiresAt = quote.personal_expires_at || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
+  const statements = [
+    env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id),
+    env.DB.prepare("UPDATE customer_quotes SET thumbnail_image = ?, thumbnail_image_key = ?, full_images_expires_at = ? WHERE id = ?")
+      .bind(thumbnail.url, thumbnail.key, fullExpiresAt, id),
+    env.DB.prepare(
+      `INSERT INTO quote_images (id, quote_id, object_key, url, image_type, sort_order, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(createId("qimg"), id, thumbnail.key, thumbnail.url, "thumbnail", 0, personalExpiresAt, createdAt),
+  ];
+  originals.forEach((saved, index) => {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO quote_images (id, quote_id, object_key, url, image_type, sort_order, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(createId("qimg"), id, saved.key, saved.url, "full", index + 1, fullExpiresAt, createdAt)
+    );
+  });
+
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    await Promise.all(newKeys.map(async (key) => { try { await env.FILES.delete(key); } catch (_) {} }));
+    return json({ ok: false, message: error?.message || "이미지 정보를 저장하지 못했습니다." }, 500);
+  }
+
+  await Promise.all((oldImages.results || []).map(async (row) => {
+    const key = String(row.object_key || "");
+    if (!key || newKeys.includes(key)) return;
+    try { await env.FILES.delete(key); } catch (_) {}
+  }));
+
+  const updated = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
+  const updatedImages = await getQuoteImages(env, id);
+  return json({ ok: true, row: normalizeCustomerQuote(updated, updatedImages) });
 }
 
 async function deleteCustomerQuote(env, request, id) {
@@ -1130,10 +1301,18 @@ async function getFile(env, key) {
   const object = await env.FILES.get(key);
   if (!object) return new Response("Not found", { status: 404 });
 
-  return new Response(object.body, {
+  const buffer = await object.arrayBuffer();
+  const contentType = detectFileContentType(
+    new Uint8Array(buffer),
+    object.httpMetadata?.contentType || "application/octet-stream"
+  );
+
+  return new Response(buffer, {
     headers: {
-      "Content-Type": object.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Type": contentType,
+      "Content-Disposition": "inline",
       "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }
@@ -1348,6 +1527,9 @@ export async function onRequest(context) {
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
+  if (path.startsWith("customer-quotes/") && path.endsWith("/images") && method === "POST") {
+    return replaceCustomerQuoteImages(env, request, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
   if (path.startsWith("customer-quotes/") && method === "PATCH") {
     return updateCustomerQuote(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
