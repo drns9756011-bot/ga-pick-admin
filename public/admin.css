@@ -2309,3 +2309,41 @@ body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
 .brand-admin-empty { padding: 34px 18px; text-align: center; color: #77837f; background: #f8faf9; border-radius: 13px; }
 @media (max-width: 1120px) { .brand-admin-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .brand-admin-form-row { grid-template-columns: 1fr; } .brand-admin-package-card { grid-template-columns: 68px 1fr; } .brand-admin-package-actions { grid-column: 1 / -1; flex-direction: row; } }
+
+/* 2026-08-08 Brand Hall admin layout containment fix */
+body[data-admin-page="brandHall"] .admin-shell {
+  width: auto;
+  max-width: none;
+}
+
+body[data-admin-page="brandHall"] #brandHallPanel {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+body[data-admin-page="brandHall"] .brand-admin-grid,
+body[data-admin-page="brandHall"] .brand-admin-editor,
+body[data-admin-page="brandHall"] .brand-admin-packages,
+body[data-admin-page="brandHall"] .brand-admin-consults {
+  min-width: 0;
+}
+
+body[data-admin-page="brandHall"] .brand-admin-editor,
+body[data-admin-page="brandHall"] .brand-admin-packages,
+body[data-admin-page="brandHall"] .brand-admin-consults {
+  overflow: hidden;
+}
+
+body[data-admin-page="brandHall"] .brand-consult-admin-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+@media (max-width: 1080px) {
+  body[data-admin-page="brandHall"] .brand-admin-grid {
+    grid-template-columns: 1fr;
+  }
+}
