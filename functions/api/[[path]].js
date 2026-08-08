@@ -258,6 +258,8 @@ function normalizeCustomerQuote(row, images = []) {
     memo: row.memo || "",
     status: row.status || "open",
     selectedBidId: row.selected_bid_id || null,
+    contactReleaseScope: row.contact_release_scope || "selected",
+    contactReleasedBidIds: parseJson(row.contact_released_bid_ids, []),
     bidCount: Number(row.bid_count || bids.length || 0),
     bids,
     saleCompletedAt: row.sale_completed_at || "",
@@ -987,6 +989,8 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN full_images_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN personal_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN desired_brand TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN contact_release_scope TEXT DEFAULT 'selected'",
+    "ALTER TABLE customer_quotes ADD COLUMN contact_released_bid_ids TEXT DEFAULT '[]'",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];

@@ -1621,11 +1621,26 @@ function quoteStatusMeta(quote) {
   return { label: "견적제안 중", className: "quote-bidding", note: "판매자가 제안할 수 있는 상태입니다." };
 }
 
+function getAdminQuoteSelectionMeta(quote) {
+  if (!quote?.selectedBidId) return null;
+  const releasedIds = Array.isArray(quote.contactReleasedBidIds)
+    ? quote.contactReleasedBidIds.map((id) => String(id || "")).filter(Boolean)
+    : [];
+  const top3 = quote.contactReleaseScope === "top3" || releasedIds.length > 1;
+  return {
+    top3,
+    label: top3 ? "1~3순위" : "1순위만",
+    detail: top3 ? "1~3순위까지 연락처 공개" : "1순위에게만 연락처 공개",
+    releasedIds,
+  };
+}
+
 function renderQuoteBidSummary(quote) {
   const bids = Array.isArray(quote.bids) ? quote.bids : [];
   const sortedBids = [...bids].sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
   const lowestBid = sortedBids[0];
   const selectedBid = sortedBids.find((bid) => bid.id === quote.selectedBidId);
+  const selectionMeta = getAdminQuoteSelectionMeta(quote);
   const summaryText = sortedBids.length
     ? `제안 ${sortedBids.length}건 · 최저 ${formatWon(lowestBid?.price)}`
     : "제안 0건";
@@ -1634,6 +1649,7 @@ function renderQuoteBidSummary(quote) {
     <details class="quote-bid-summary">
       <summary>
         <span>${escapeHTML(summaryText)}</span>
+        ${selectionMeta ? `<span class="quote-selection-summary ${selectionMeta.top3 ? "is-top3" : "is-single"}">${escapeHTML(selectionMeta.detail)}</span>` : ""}
         ${selectedBid ? `<strong>선택 매니저 ${escapeHTML(selectedBid.manager || selectedBid.seller || "-")}</strong>` : ""}
       </summary>
       ${
@@ -1642,6 +1658,7 @@ function renderQuoteBidSummary(quote) {
               ${sortedBids
                 .map((bid, index) => {
                   const isSelected = bid.id === quote.selectedBidId;
+                  const isContactReleased = Boolean(selectionMeta?.releasedIds?.includes(String(bid.id || "")));
                   const managerLabel = [bid.manager, bid.managerPosition].filter(Boolean).join(" ");
                   const branchLabel = [bid.channel, bid.branch].filter(Boolean).join(" ");
                   return `
@@ -1655,7 +1672,7 @@ function renderQuoteBidSummary(quote) {
                         <small>${escapeHTML(formatPhoneNumber(bid.phone) || "연락처 미입력")}</small>
                       </div>
                       <p>${escapeHTML(bid.benefits || "제공 조건 미입력")}</p>
-                      ${isSelected ? `<em>고객님 선택</em>` : ""}
+                      ${isSelected ? `<em>고객님 직접 선택</em>` : isContactReleased ? `<em class="contact-released">연락처 공개 대상</em>` : ""}
                     </article>
                   `;
                 })
@@ -1739,6 +1756,7 @@ function renderCustomerQuotes() {
               <span>등록 ${escapeHTML(formatDate(quote.createdAt))}</span>
               <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
               <span>제안 ${escapeHTML(String(quote.bidCount || quote.bidsCount || 0))}건</span>
+              ${getAdminQuoteSelectionMeta(quote) ? `<span class="quote-selection-chip ${getAdminQuoteSelectionMeta(quote).top3 ? "is-top3" : "is-single"}">고객 선택 범위 · ${escapeHTML(getAdminQuoteSelectionMeta(quote).label)}</span>` : ""}
               <span data-admin-quote-countdown data-quote-id="${escapeHTML(quote.id)}">남은 시간 ${escapeHTML(getAdminQuoteRemainingLabel(quote))}</span>
             </div>
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>

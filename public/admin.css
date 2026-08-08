@@ -2347,3 +2347,37 @@ body[data-admin-page="brandHall"] .brand-consult-admin-table-wrap {
     grid-template-columns: 1fr;
   }
 }
+
+/* Customer quote selection scope */
+.quote-admin-meta span.quote-selection-chip {
+  background: #eaf8f4;
+  color: #0b6f62;
+  border: 1px solid #bfe7dc;
+}
+.quote-admin-meta span.quote-selection-chip.is-top3 {
+  background: #fff7df;
+  color: #8a5b00;
+  border-color: #f2d38a;
+}
+.quote-bid-summary summary .quote-selection-summary {
+  margin-left: auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eaf8f4;
+  color: #0b6f62;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+.quote-bid-summary summary .quote-selection-summary.is-top3 {
+  background: #fff7df;
+  color: #8a5b00;
+}
+.quote-bid-row em.contact-released {
+  background: #eaf8f4;
+  color: #0b6f62;
+}
+@media (max-width: 720px) {
+  .quote-bid-summary summary { flex-wrap: wrap; }
+  .quote-bid-summary summary .quote-selection-summary { margin-left: 0; }
+}
