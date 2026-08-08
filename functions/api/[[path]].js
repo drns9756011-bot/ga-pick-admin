@@ -1771,6 +1771,269 @@ async function getSellerAccessLogs(env, request) {
   });
 }
 
+
+let brandHallAdminTablesReady = false;
+
+async function ensureBrandHallAdminTables(env) {
+  if (brandHallAdminTablesReady) return;
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS brand_packages (
+      id TEXT PRIMARY KEY,
+      seller_id TEXT NOT NULL,
+      channel TEXT DEFAULT '',
+      branch TEXT DEFAULT '',
+      branch_region TEXT DEFAULT '',
+      manager TEXT DEFAULT '',
+      manager_phone TEXT DEFAULT '',
+      brand TEXT DEFAULT '',
+      title TEXT NOT NULL,
+      items_json TEXT DEFAULT '[]',
+      original_price INTEGER DEFAULT 0,
+      sale_price INTEGER DEFAULT 0,
+      benefits TEXT DEFAULT '',
+      cover_image TEXT DEFAULT '',
+      cover_image_key TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS brand_consultations (
+      id TEXT PRIMARY KEY,
+      package_id TEXT NOT NULL,
+      seller_id TEXT NOT NULL,
+      channel TEXT DEFAULT '',
+      branch TEXT DEFAULT '',
+      manager TEXT DEFAULT '',
+      manager_phone TEXT DEFAULT '',
+      package_title TEXT DEFAULT '',
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      customer_region TEXT DEFAULT '',
+      preferred_time TEXT DEFAULT '',
+      memo TEXT DEFAULT '',
+      consent_json TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'new',
+      delivery_status TEXT DEFAULT 'pending',
+      delivery_error TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  ).run();
+  const migrations = [
+    "ALTER TABLE brand_consultations ADD COLUMN contract_amount INTEGER DEFAULT 0",
+    "ALTER TABLE brand_consultations ADD COLUMN commission_amount INTEGER DEFAULT 0",
+    "ALTER TABLE brand_consultations ADD COLUMN settlement_status TEXT DEFAULT 'unsettled'",
+    "ALTER TABLE brand_consultations ADD COLUMN settled_at TEXT DEFAULT ''",
+    "ALTER TABLE brand_consultations ADD COLUMN admin_memo TEXT DEFAULT ''",
+  ];
+  for (const sql of migrations) {
+    try { await env.DB.prepare(sql).run(); } catch (error) {
+      if (!String(error?.message || error || '').toLowerCase().includes('duplicate column')) console.warn('브랜드관 관리자 마이그레이션', error);
+    }
+  }
+  const indexes = [
+    "CREATE INDEX IF NOT EXISTS idx_brand_packages_status_updated ON brand_packages(status, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_brand_packages_seller ON brand_packages(seller_id, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_brand_consultations_created ON brand_consultations(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_brand_consultations_status ON brand_consultations(status, created_at DESC)",
+  ];
+  for (const sql of indexes) {
+    try { await env.DB.prepare(sql).run(); } catch (error) { console.warn('브랜드관 관리자 인덱스', error); }
+  }
+  brandHallAdminTablesReady = true;
+}
+
+function normalizeBrandHallPublicChannel(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const compact = text.replace(/\s+/g, '').toLowerCase();
+  if (compact.includes('전자랜드')) return '전자랜드';
+  if (compact.includes('하이마트')) return '하이마트';
+  if (compact.includes('삼성스토어') || compact.includes('samsungstore')) return '삼성스토어';
+  if (compact.includes('lg전자bestshop') || compact.includes('lgbestshop') || compact.includes('lg베스트샵') || compact.includes('베스트샵')) return 'LG전자 BEST SHOP';
+  return '';
+}
+
+function normalizeBrandHallPackageAdmin(row) {
+  if (!row) return null;
+  return {
+    id: row.id || '',
+    sellerId: row.seller_id || '',
+    publicChannel: normalizeBrandHallPublicChannel(row.channel),
+    channel: row.channel || '',
+    branch: row.branch || '',
+    branchRegion: row.branch_region || '',
+    manager: row.manager || '',
+    managerPhone: normalizePhone(row.manager_phone || ''),
+    brand: row.brand || '',
+    title: row.title || '',
+    items: parseJson(row.items_json, []),
+    originalPrice: Number(row.original_price || 0),
+    salePrice: Number(row.sale_price || 0),
+    benefits: row.benefits || '',
+    coverImage: row.cover_image || '',
+    coverImageKey: row.cover_image_key || '',
+    status: row.status || 'active',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+  };
+}
+
+function normalizeBrandHallConsultationAdmin(row) {
+  if (!row) return null;
+  return {
+    id: row.id || '',
+    packageId: row.package_id || '',
+    sellerId: row.seller_id || '',
+    publicChannel: normalizeBrandHallPublicChannel(row.channel),
+    channel: row.channel || '',
+    branch: row.branch || '',
+    manager: row.manager || '',
+    managerPhone: normalizePhone(row.manager_phone || ''),
+    packageTitle: row.package_title || '',
+    customerName: row.customer_name || '',
+    customerPhone: normalizePhone(row.customer_phone || ''),
+    customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''),
+    customerRegion: row.customer_region || '',
+    preferredTime: row.preferred_time || '',
+    memo: row.memo || '',
+    status: row.status || 'new',
+    deliveryStatus: row.delivery_status || '',
+    deliveryError: row.delivery_error || '',
+    contractAmount: Number(row.contract_amount || 0),
+    commissionAmount: Number(row.commission_amount || 0),
+    settlementStatus: row.settlement_status || 'unsettled',
+    settledAt: row.settled_at || '',
+    adminMemo: row.admin_memo || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+  };
+}
+
+async function getBrandHallAdmin(env) {
+  await ensureBrandHallAdminTables(env);
+  const [packages, consultations] = await Promise.all([
+    env.DB.prepare('SELECT * FROM brand_packages ORDER BY updated_at DESC LIMIT 500').all(),
+    env.DB.prepare('SELECT * FROM brand_consultations ORDER BY created_at DESC LIMIT 1000').all(),
+  ]);
+  return json({
+    ok: true,
+    packages: (packages.results || []).map(normalizeBrandHallPackageAdmin),
+    consultations: (consultations.results || []).map(normalizeBrandHallConsultationAdmin),
+  });
+}
+
+async function getApprovedSellerForBrandHall(env, sellerId) {
+  const row = await env.DB.prepare("SELECT * FROM approved_sellers WHERE seller_id = ? AND status = 'approved' LIMIT 1")
+    .bind(String(sellerId || '').trim()).first();
+  if (!row) return null;
+  if (!normalizeBrandHallPublicChannel(row.channel)) return null;
+  return row;
+}
+
+async function saveBrandHallPackageAdmin(env, request, packageId = '') {
+  await ensureBrandHallAdminTables(env);
+  const body = await request.json().catch(() => ({}));
+  const payload = body.package || body || {};
+  const id = String(packageId || payload.id || '').trim() || createId('brandpkg');
+  const sellerId = String(payload.sellerId || '').trim();
+  const seller = await getApprovedSellerForBrandHall(env, sellerId);
+  if (!seller) return json({ ok: false, message: '브랜드관에 사용할 승인 판매자를 선택해주세요. 지정된 4개 채널만 등록할 수 있습니다.' }, 400);
+
+  const title = String(payload.title || '').trim().slice(0, 80);
+  const brand = String(payload.brand || '').trim().slice(0, 40);
+  const items = Array.isArray(payload.items)
+    ? payload.items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 20)
+    : String(payload.items || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 20);
+  const originalPrice = Math.max(0, Math.floor(Number(payload.originalPrice || 0)));
+  const salePrice = Math.max(0, Math.floor(Number(payload.salePrice || 0)));
+  const benefits = String(payload.benefits || '').trim().slice(0, 1000);
+  const status = String(payload.status || 'active') === 'hidden' ? 'hidden' : 'active';
+  if (!title || !brand || !items.length || !salePrice) return json({ ok: false, message: '브랜드, 패키지명, 제품 구성, 판매 금액은 필수입니다.' }, 400);
+
+  const existing = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
+  let coverImage = existing?.cover_image || '';
+  let coverImageKey = existing?.cover_image_key || '';
+  const coverDataUrl = String(payload.coverImageDataUrl || '');
+  if (coverDataUrl) {
+    const info = dataUrlInfo(coverDataUrl);
+    if (!info || !isBrowserSafeQuoteImageType(info.contentType)) return json({ ok: false, message: '대표 이미지는 JPG, PNG 또는 WebP만 등록할 수 있습니다.' }, 415);
+    if (!env.FILES) return json({ ok: false, message: 'R2 파일 저장소가 연결되지 않았습니다.' }, 500);
+    const saved = await saveDataUrlToR2(env, coverDataUrl, 'brand-packages', `${id}-cover-${Date.now()}`);
+    if (!saved.key) return json({ ok: false, message: '대표 이미지를 저장하지 못했습니다.' }, 500);
+    const oldKey = coverImageKey;
+    coverImage = saved.url || '';
+    coverImageKey = saved.key || '';
+    if (oldKey && oldKey !== coverImageKey) {
+      try { await env.FILES.delete(oldKey); } catch (error) { console.warn('이전 브랜드관 이미지 삭제 실패', error); }
+    }
+  }
+
+  const now = new Date().toISOString();
+  const snapshot = {
+    channel: seller.channel || '', branch: seller.branch || '', branchRegion: seller.branch_region || '',
+    manager: seller.manager || '', managerPhone: normalizePhone(seller.phone || ''),
+  };
+  if (!existing) {
+    await env.DB.prepare(
+      `INSERT INTO brand_packages
+       (id, seller_id, channel, branch, branch_region, manager, manager_phone, brand, title, items_json,
+        original_price, sale_price, benefits, cover_image, cover_image_key, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, sellerId, snapshot.channel, snapshot.branch, snapshot.branchRegion, snapshot.manager, snapshot.managerPhone,
+      brand, title, JSON.stringify(items), originalPrice, salePrice, benefits, coverImage, coverImageKey, status, now, now).run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE brand_packages SET seller_id = ?, channel = ?, branch = ?, branch_region = ?, manager = ?, manager_phone = ?,
+       brand = ?, title = ?, items_json = ?, original_price = ?, sale_price = ?, benefits = ?, cover_image = ?, cover_image_key = ?,
+       status = ?, updated_at = ? WHERE id = ?`
+    ).bind(sellerId, snapshot.channel, snapshot.branch, snapshot.branchRegion, snapshot.manager, snapshot.managerPhone,
+      brand, title, JSON.stringify(items), originalPrice, salePrice, benefits, coverImage, coverImageKey, status, now, id).run();
+  }
+  const savedRow = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
+  if (!savedRow) return json({ ok: false, message: '패키지 서버 저장 여부를 확인하지 못했습니다.' }, 500);
+  return json({ ok: true, row: normalizeBrandHallPackageAdmin(savedRow) });
+}
+
+async function deleteBrandHallPackageAdmin(env, packageId) {
+  await ensureBrandHallAdminTables(env);
+  const id = String(packageId || '').trim();
+  const row = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
+  if (!row) return json({ ok: false, message: '삭제할 브랜드관 패키지를 찾을 수 없습니다.' }, 404);
+  await env.DB.prepare('DELETE FROM brand_packages WHERE id = ?').bind(id).run();
+  if (row.cover_image_key && env.FILES) {
+    try { await env.FILES.delete(row.cover_image_key); } catch (error) { console.warn('브랜드관 이미지 삭제 실패', error); }
+  }
+  const verify = await env.DB.prepare('SELECT id FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
+  if (verify?.id) return json({ ok: false, message: '브랜드관 패키지가 서버에서 삭제되지 않았습니다.' }, 500);
+  return json({ ok: true, deletedId: id });
+}
+
+async function updateBrandHallConsultationAdmin(env, request, consultationId) {
+  await ensureBrandHallAdminTables(env);
+  const id = String(consultationId || '').trim();
+  const body = await request.json().catch(() => ({}));
+  const existing = await env.DB.prepare('SELECT * FROM brand_consultations WHERE id = ? LIMIT 1').bind(id).first();
+  if (!existing) return json({ ok: false, message: '상담 신청 내역을 찾을 수 없습니다.' }, 404);
+  const allowedStatus = new Set(['new', 'contacted', 'negotiating', 'contracted', 'cancelled']);
+  const allowedSettlement = new Set(['unsettled', 'pending', 'settled', 'waived']);
+  const status = allowedStatus.has(String(body.status || '')) ? String(body.status) : (existing.status || 'new');
+  const settlementStatus = allowedSettlement.has(String(body.settlementStatus || '')) ? String(body.settlementStatus) : (existing.settlement_status || 'unsettled');
+  const contractAmount = Math.max(0, Math.floor(Number(body.contractAmount ?? existing.contract_amount ?? 0)));
+  const commissionAmount = Math.max(0, Math.floor(Number(body.commissionAmount ?? existing.commission_amount ?? 0)));
+  const adminMemo = String(body.adminMemo ?? existing.admin_memo ?? '').trim().slice(0, 1200);
+  let settledAt = String(existing.settled_at || '');
+  if (settlementStatus === 'settled' && !settledAt) settledAt = new Date().toISOString();
+  if (settlementStatus !== 'settled') settledAt = '';
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE brand_consultations SET status = ?, contract_amount = ?, commission_amount = ?, settlement_status = ?, settled_at = ?, admin_memo = ?, updated_at = ? WHERE id = ?`
+  ).bind(status, contractAmount, commissionAmount, settlementStatus, settledAt, adminMemo, now, id).run();
+  const row = await env.DB.prepare('SELECT * FROM brand_consultations WHERE id = ? LIMIT 1').bind(id).first();
+  return json({ ok: true, row: normalizeBrandHallConsultationAdmin(row) });
+}
+
 function getAdminAuthStatus(env) {
   const tokenEntries = getAdminTokenEntries(env);
   return json({
@@ -1825,6 +2088,12 @@ export async function onRequest(context) {
   if (path.startsWith("approved-sellers/") && method === "DELETE") {
     return deleteApprovedSeller(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }
+
+  if (path === "brand-hall" && method === "GET") return getBrandHallAdmin(env);
+  if (path === "brand-hall/packages" && method === "POST") return saveBrandHallPackageAdmin(env, request);
+  if (path.startsWith("brand-hall/packages/") && method === "PATCH") return saveBrandHallPackageAdmin(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/packages/") && method === "DELETE") return deleteBrandHallPackageAdmin(env, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/consultations/") && method === "PATCH") return updateBrandHallConsultationAdmin(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
 
   if (path === "alimtalk" && method === "GET") return getAlimtalk(env);
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);

@@ -2264,3 +2264,48 @@ body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
     width: 100%;
   }
 }
+
+
+/* Brand Hall admin */
+.brand-hall-admin-panel { display: grid; gap: 28px; }
+.brand-admin-head { align-items: flex-start; }
+.brand-admin-grid { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(420px, 1.1fr); gap: 22px; align-items: start; }
+.brand-admin-editor, .brand-admin-packages, .brand-admin-consults { border: 1px solid #e1e8e5; border-radius: 18px; padding: 20px; background: #fff; }
+.brand-admin-subhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.brand-admin-subhead h3 { margin: 2px 0 0; font-size: 1.12rem; }
+.brand-package-admin-form { display: grid; gap: 13px; }
+.brand-package-admin-form label { display: grid; gap: 7px; font-size: .83rem; font-weight: 700; color: #34413e; }
+.brand-package-admin-form input, .brand-package-admin-form select, .brand-package-admin-form textarea,
+.brand-consult-admin-table input, .brand-consult-admin-table select, .brand-consult-admin-table textarea { width: 100%; border: 1px solid #d8e2de; border-radius: 10px; padding: 10px 11px; background: #fff; font: inherit; color: #26312f; }
+.brand-admin-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.brand-selected-seller { min-height: 66px; border-radius: 12px; padding: 12px 14px; background: #f2f8f5; border: 1px solid #d9ebe3; color: #53625e; line-height: 1.55; font-size: .82rem; }
+.brand-selected-seller strong { color: #0f6656; }
+.field-help { font-weight: 500; color: #86928f; }
+.brand-cover-preview { min-height: 130px; display: grid; place-items: center; overflow: hidden; border: 1px dashed #cfdcd7; border-radius: 13px; background: #f8faf9; color: #85918e; }
+.brand-cover-preview img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+.brand-package-save { width: 100%; }
+.brand-admin-package-list { display: grid; gap: 11px; max-height: 720px; overflow: auto; padding-right: 3px; }
+.brand-admin-package-card { border: 1px solid #e1e8e5; border-radius: 14px; padding: 14px; display: grid; grid-template-columns: 82px 1fr auto; gap: 13px; align-items: center; }
+.brand-admin-package-thumb { width: 82px; height: 68px; border-radius: 10px; background: #eef5f2; overflow: hidden; display: grid; place-items: center; color: #0f6656; font-weight: 800; }
+.brand-admin-package-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.brand-admin-package-copy { min-width: 0; }
+.brand-admin-package-copy strong { display: block; color: #23302d; margin-bottom: 4px; }
+.brand-admin-package-copy p { margin: 2px 0; color: #64716e; font-size: .78rem; line-height: 1.45; }
+.brand-admin-package-copy b { color: #0f6656; font-size: .9rem; }
+.brand-admin-package-actions { display: flex; flex-direction: column; gap: 7px; }
+.brand-admin-package-actions button { white-space: nowrap; }
+.brand-admin-consults { margin-top: 2px; }
+.brand-consult-admin-table-wrap { overflow: auto; }
+.brand-consult-admin-table { min-width: 1540px; }
+.brand-consult-admin-table th { white-space: nowrap; }
+.brand-consult-admin-table td { vertical-align: top; min-width: 120px; }
+.brand-consult-admin-table td:nth-child(2) { min-width: 165px; }
+.brand-consult-admin-table td:nth-child(3) { min-width: 240px; }
+.brand-consult-admin-table td:nth-child(8) { min-width: 220px; }
+.brand-consult-admin-table .brand-consult-meta { font-size: .74rem; line-height: 1.5; color: #687572; }
+.brand-consult-admin-table .brand-consult-meta strong { display: block; color: #25322f; font-size: .8rem; }
+.brand-consult-admin-table textarea { min-height: 72px; resize: vertical; }
+.brand-consult-save-btn { white-space: nowrap; }
+.brand-admin-empty { padding: 34px 18px; text-align: center; color: #77837f; background: #f8faf9; border-radius: 13px; }
+@media (max-width: 1120px) { .brand-admin-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .brand-admin-form-row { grid-template-columns: 1fr; } .brand-admin-package-card { grid-template-columns: 68px 1fr; } .brand-admin-package-actions { grid-column: 1 / -1; flex-direction: row; } }

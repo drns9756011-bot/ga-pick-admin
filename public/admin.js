@@ -10,6 +10,8 @@ const STORAGE_KEYS = {
   sellerAccessSummary: "pickquoteSellerAccessSummary",
   adminLastRefreshedAt: "pickquoteAdminLastRefreshedAt",
   adminApiToken: "pickquoteAdminApiToken",
+  brandPackages: "pickquoteBrandPackagesAdmin",
+  brandConsultations: "pickquoteBrandConsultationsAdmin",
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
@@ -64,6 +66,18 @@ const adminHeaderCopy = document.querySelector(".header-copy");
 const adminLoadingModal = document.querySelector("#adminLoadingModal");
 const adminLoadingTitle = document.querySelector("#adminLoadingTitle");
 const adminLoadingText = document.querySelector("#adminLoadingText");
+const brandHallPanel = document.querySelector("#brandHallPanel");
+const brandPackageAdminForm = document.querySelector("#brandPackageAdminForm");
+const brandPackageSeller = document.querySelector("#brandPackageSeller");
+const brandSelectedSeller = document.querySelector("#brandSelectedSeller");
+const brandAdminPackageList = document.querySelector("#brandAdminPackageList");
+const brandPackageAdminCount = document.querySelector("#brandPackageAdminCount");
+const brandConsultAdminRows = document.querySelector("#brandConsultAdminRows");
+const brandConsultAdminCount = document.querySelector("#brandConsultAdminCount");
+const brandCoverImageInput = document.querySelector("#brandCoverImageInput");
+const brandCoverPreview = document.querySelector("#brandCoverPreview");
+const brandPackageFormTitle = document.querySelector("#brandPackageFormTitle");
+let brandCoverDataUrl = "";
 let adminLoadingCount = 0;
 document.querySelector(".home-link")?.setAttribute("href", "https://ga-pick.com/");
 document.querySelector(".home-link")?.setAttribute("target", "_blank");
@@ -101,6 +115,13 @@ const ADMIN_PAGE_CONFIG = {
     copy: "채널, 지점, 매니저, 직책, 비밀번호 초기화와 계정 삭제를 관리합니다.",
     visible: ["statGrid", "adminSecondaryGrid", "approvedSellers"],
   },
+  brandHall: {
+    path: "/brand-hall",
+    title: "브랜드관 관리",
+    heading: "브랜드관 패키지와 상담·정산을 직접 관리하세요.",
+    copy: "고객에게는 채널만 노출하고, 실제 지점과 매니저 정보는 관리자 화면에서만 사용합니다.",
+    visible: ["statGrid", "brandHallPanel"],
+  },
   sellerAccess: {
     path: "/seller-access",
     title: "판매자 접속 기록",
@@ -127,6 +148,7 @@ const ADMIN_SECTION_IDS = [
   "applicationDetail",
   "adminSecondaryGrid",
   "approvedSellers",
+  "brandHallPanel",
   "sellerAccessPanel",
   "alimtalkControl",
 ];
@@ -136,6 +158,7 @@ function adminPageKeyFromPath(pathname) {
   if (normalized === "/customers") return "customers";
   if (normalized === "/sellers") return "sellers";
   if (normalized === "/approved-sellers") return "approvedSellers";
+  if (normalized === "/brand-hall") return "brandHall";
   if (normalized === "/seller-access") return "sellerAccess";
   if (normalized === "/alimtalk") return "alimtalk";
   return "dashboard";
@@ -568,6 +591,12 @@ async function loadSellerAccessLogsFromServer(options = {}) {
   return apiJson(`/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
 }
 
+async function loadBrandHallFromServer(options = {}) {
+  const timestamp = Date.now();
+  const requestOptions = options.silent ? { silent: true } : {};
+  return apiJson(`/api/brand-hall?ts=${timestamp}`, requestOptions);
+}
+
 async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
   const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
@@ -608,6 +637,8 @@ function clearCurrentAdminData() {
   writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, []);
   writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, []);
   writeStorageArray(STORAGE_KEYS.sellerAccessLogs, []);
+  writeStorageArray(STORAGE_KEYS.brandPackages, []);
+  writeStorageArray(STORAGE_KEYS.brandConsultations, []);
   localStorage.removeItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`);
   localStorage.removeItem(STORAGE_KEYS.visitStats);
   localStorage.removeItem(STORAGE_KEYS.sellerAccessSummary);
@@ -635,9 +666,10 @@ async function loadAdminDataFromServer(options = {}) {
       loadLplanTrainingFromServer({ silent: true, limit: 100 }),
       loadVisitStatsFromServer(requestOptions),
       loadSellerAccessLogsFromServer({ silent: true }),
+      loadBrandHallFromServer({ silent: true }),
     ]);
 
-    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = results;
+    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess, brandHall] = results;
     const authFailure = results.find((result) =>
       result && result.ok === false && [401, 503].includes(Number(result.status || 0))
     );
@@ -678,6 +710,11 @@ async function loadAdminDataFromServer(options = {}) {
     if (sellerAccess?.ok && Array.isArray(sellerAccess.rows)) {
       writeStorageArray(STORAGE_KEYS.sellerAccessLogs, sellerAccess.rows);
       localStorage.setItem(STORAGE_KEYS.sellerAccessSummary, JSON.stringify(sellerAccess.summary || {}));
+      updatedCount += 1;
+    }
+    if (brandHall?.ok) {
+      if (Array.isArray(brandHall.packages)) writeStorageArray(STORAGE_KEYS.brandPackages, brandHall.packages);
+      if (Array.isArray(brandHall.consultations)) writeStorageArray(STORAGE_KEYS.brandConsultations, brandHall.consultations);
       updatedCount += 1;
     }
     if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
@@ -2041,12 +2078,180 @@ function openStatAction(action) {
   }
 }
 
+
+function getBrandPackagesAdmin() { return readStorageArray(STORAGE_KEYS.brandPackages); }
+function setBrandPackagesAdmin(rows) { writeStorageArray(STORAGE_KEYS.brandPackages, Array.isArray(rows) ? rows : []); }
+function getBrandConsultationsAdmin() { return readStorageArray(STORAGE_KEYS.brandConsultations); }
+function setBrandConsultationsAdmin(rows) { writeStorageArray(STORAGE_KEYS.brandConsultations, Array.isArray(rows) ? rows : []); }
+
+function brandMoney(value) { return `${new Intl.NumberFormat('ko-KR').format(Number(value || 0))}원`; }
+function brandDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ko-KR', { year:'2-digit', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function escapeBrandHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+}
+function publicBrandChannel(value) {
+  const compact = String(value || '').replace(/\s+/g, '').toLowerCase();
+  if (compact.includes('전자랜드')) return '전자랜드';
+  if (compact.includes('하이마트')) return '하이마트';
+  if (compact.includes('삼성스토어') || compact.includes('samsungstore')) return '삼성스토어';
+  if (compact.includes('lg전자bestshop') || compact.includes('lgbestshop') || compact.includes('lg베스트샵') || compact.includes('베스트샵')) return 'LG전자 BEST SHOP';
+  return '';
+}
+function eligibleBrandSellers() { return getApprovedSellers().filter((seller) => publicBrandChannel(seller.channel)); }
+
+function renderBrandSellerOptions(selected = '') {
+  if (!brandPackageSeller) return;
+  const sellers = eligibleBrandSellers();
+  const current = selected || brandPackageSeller.value;
+  brandPackageSeller.innerHTML = `<option value="">승인 판매자를 선택하세요</option>` + sellers.map((seller) =>
+    `<option value="${escapeBrandHtml(seller.sellerId)}">${escapeBrandHtml(publicBrandChannel(seller.channel))} · ${escapeBrandHtml(seller.branch || '')} · ${escapeBrandHtml(seller.manager || '')}</option>`
+  ).join('');
+  if (current && sellers.some((seller) => String(seller.sellerId) === String(current))) brandPackageSeller.value = current;
+  renderBrandSelectedSeller();
+}
+
+function renderBrandSelectedSeller() {
+  if (!brandSelectedSeller || !brandPackageSeller) return;
+  const seller = eligibleBrandSellers().find((row) => String(row.sellerId) === String(brandPackageSeller.value));
+  if (!seller) {
+    brandSelectedSeller.textContent = '판매자를 선택하면 내부 지점·매니저 정보가 표시됩니다.';
+    return;
+  }
+  brandSelectedSeller.innerHTML = `<strong>고객 공개: ${escapeBrandHtml(publicBrandChannel(seller.channel))}</strong><br>내부 지점: ${escapeBrandHtml(seller.branch || '-')} · 담당지역: ${escapeBrandHtml(seller.branchRegion || '-')}<br>매니저: ${escapeBrandHtml(seller.manager || '-')} ${escapeBrandHtml(seller.managerPosition || '')} · ${escapeBrandHtml(formatPhoneNumber(seller.phone || ''))}`;
+}
+
+function resetBrandPackageForm() {
+  if (!brandPackageAdminForm) return;
+  brandPackageAdminForm.reset();
+  brandPackageAdminForm.elements.packageId.value = '';
+  brandCoverDataUrl = '';
+  if (brandCoverPreview) brandCoverPreview.textContent = '대표 이미지 미리보기';
+  if (brandPackageFormTitle) brandPackageFormTitle.textContent = '패키지 등록';
+  renderBrandSellerOptions('');
+}
+
+function editBrandPackage(id) {
+  const row = getBrandPackagesAdmin().find((item) => String(item.id) === String(id));
+  if (!row || !brandPackageAdminForm) return;
+  brandPackageAdminForm.elements.packageId.value = row.id || '';
+  renderBrandSellerOptions(row.sellerId || '');
+  brandPackageAdminForm.elements.brand.value = row.brand || '';
+  brandPackageAdminForm.elements.status.value = row.status || 'active';
+  brandPackageAdminForm.elements.title.value = row.title || '';
+  brandPackageAdminForm.elements.items.value = Array.isArray(row.items) ? row.items.join('\n') : '';
+  brandPackageAdminForm.elements.originalPrice.value = Number(row.originalPrice || 0) || '';
+  brandPackageAdminForm.elements.salePrice.value = Number(row.salePrice || 0) || '';
+  brandPackageAdminForm.elements.benefits.value = row.benefits || '';
+  brandCoverDataUrl = '';
+  if (brandCoverPreview) brandCoverPreview.innerHTML = row.coverImage ? `<img src="${escapeBrandHtml(row.coverImage)}" alt="대표 이미지" />` : '대표 이미지 미리보기';
+  if (brandPackageFormTitle) brandPackageFormTitle.textContent = '패키지 수정';
+  brandPackageAdminForm.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+async function saveBrandPackageAdmin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const packageId = String(form.elements.packageId.value || '').trim();
+  const payload = {
+    sellerId: form.elements.sellerId.value,
+    brand: form.elements.brand.value,
+    status: form.elements.status.value,
+    title: form.elements.title.value.trim(),
+    items: form.elements.items.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean),
+    originalPrice: Number(form.elements.originalPrice.value || 0),
+    salePrice: Number(form.elements.salePrice.value || 0),
+    benefits: form.elements.benefits.value.trim(),
+    coverImageDataUrl: brandCoverDataUrl,
+  };
+  if (!payload.sellerId || !payload.brand || !payload.title || !payload.items.length || !payload.salePrice) {
+    showToast('연결 판매자, 브랜드, 패키지명, 제품 구성, 판매가는 필수입니다.');
+    return;
+  }
+  setAdminLoading(true, '브랜드관 패키지를 서버에 저장하는 중입니다.', '이미지와 판매처 정보를 함께 반영하고 있습니다.');
+  try {
+    const result = await apiJson(packageId ? `/api/brand-hall/packages/${encodeURIComponent(packageId)}` : '/api/brand-hall/packages', {
+      method: packageId ? 'PATCH' : 'POST', body: JSON.stringify({ package: payload }), silent: true,
+    });
+    if (!result?.ok || !result.row) { showToast(result?.message || '브랜드관 패키지 저장에 실패했습니다.'); return; }
+    const rows = getBrandPackagesAdmin();
+    const index = rows.findIndex((row) => String(row.id) === String(result.row.id));
+    if (index >= 0) rows[index] = result.row; else rows.unshift(result.row);
+    setBrandPackagesAdmin(rows);
+    resetBrandPackageForm();
+    renderBrandHallAdmin();
+    showToast('브랜드관 패키지를 서버에 저장했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+async function deleteBrandPackageAdmin(id) {
+  const row = getBrandPackagesAdmin().find((item) => String(item.id) === String(id));
+  if (!row) return;
+  if (!window.confirm(`${row.title || '패키지'}를 브랜드관 서버에서 삭제할까요?`)) return;
+  setAdminLoading(true, '브랜드관 패키지를 삭제하는 중입니다.', '서버 데이터와 대표 이미지를 함께 정리하고 있습니다.');
+  try {
+    const result = await apiJson(`/api/brand-hall/packages/${encodeURIComponent(id)}`, { method:'DELETE', silent:true });
+    if (!result?.ok) { showToast(result?.message || '패키지 삭제에 실패했습니다.'); return; }
+    setBrandPackagesAdmin(getBrandPackagesAdmin().filter((item) => String(item.id) !== String(id)));
+    if (brandPackageAdminForm?.elements.packageId.value === id) resetBrandPackageForm();
+    renderBrandHallAdmin();
+    showToast('브랜드관 패키지를 서버에서 삭제했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+async function saveBrandConsultationAdmin(id) {
+  const rowEl = document.querySelector(`[data-brand-consult-row="${CSS.escape(id)}"]`);
+  if (!rowEl) return;
+  const payload = {
+    status: rowEl.querySelector('[data-brand-consult-status]')?.value || 'new',
+    contractAmount: Number(rowEl.querySelector('[data-brand-contract-amount]')?.value || 0),
+    commissionAmount: Number(rowEl.querySelector('[data-brand-commission-amount]')?.value || 0),
+    settlementStatus: rowEl.querySelector('[data-brand-settlement-status]')?.value || 'unsettled',
+    adminMemo: rowEl.querySelector('[data-brand-admin-memo]')?.value || '',
+  };
+  setAdminLoading(true, '상담·정산 상태를 저장하는 중입니다.', '계약 진행 정보와 수수료 정산 상태를 서버에 반영하고 있습니다.');
+  try {
+    const result = await apiJson(`/api/brand-hall/consultations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(payload), silent:true });
+    if (!result?.ok || !result.row) { showToast(result?.message || '상담 상태 저장에 실패했습니다.'); return; }
+    const rows = getBrandConsultationsAdmin();
+    const index = rows.findIndex((row) => String(row.id) === String(id));
+    if (index >= 0) rows[index] = result.row;
+    setBrandConsultationsAdmin(rows);
+    renderBrandHallAdmin();
+    showToast('상담·계약·수수료 정보를 서버에 저장했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+function renderBrandHallAdmin() {
+  if (!brandHallPanel) return;
+  renderBrandSellerOptions(brandPackageAdminForm?.elements.sellerId?.value || '');
+  const packages = getBrandPackagesAdmin();
+  if (brandPackageAdminCount) brandPackageAdminCount.textContent = `${packages.length}건`;
+  if (brandAdminPackageList) {
+    brandAdminPackageList.innerHTML = packages.length ? packages.map((row) => {
+      const thumb = row.coverImage ? `<img src="${escapeBrandHtml(row.coverImage)}" alt="" />` : escapeBrandHtml((row.brand || 'P').slice(0,1));
+      return `<article class="brand-admin-package-card"><div class="brand-admin-package-thumb">${thumb}</div><div class="brand-admin-package-copy"><strong>${escapeBrandHtml(row.title)}</strong><p>고객 공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')} · ${escapeBrandHtml(row.brand || '')}</p><p>내부: ${escapeBrandHtml(row.branch || '-')} · ${escapeBrandHtml(row.manager || '-')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</p><b>${brandMoney(row.salePrice)} · ${row.status === 'active' ? '공개' : '숨김'}</b></div><div class="brand-admin-package-actions"><button class="plain-btn" type="button" data-brand-package-edit="${escapeBrandHtml(row.id)}">수정</button><button class="danger-btn" type="button" data-brand-package-delete="${escapeBrandHtml(row.id)}">삭제</button></div></article>`;
+    }).join('') : '<div class="brand-admin-empty">등록된 브랜드관 패키지가 없습니다.</div>';
+  }
+
+  const consultations = getBrandConsultationsAdmin();
+  if (brandConsultAdminCount) brandConsultAdminCount.textContent = `${consultations.length}건`;
+  if (brandConsultAdminRows) {
+    brandConsultAdminRows.innerHTML = consultations.length ? consultations.map((row) => `<tr data-brand-consult-row="${escapeBrandHtml(row.id)}"><td><div class="brand-consult-meta"><strong>${brandDate(row.createdAt)}</strong>${escapeBrandHtml(row.deliveryStatus || '')}${row.deliveryError ? `<br><span title="${escapeBrandHtml(row.deliveryError)}">알림 오류</span>` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.customerName)}</strong><a href="tel:${escapeBrandHtml(row.customerPhone)}">${escapeBrandHtml(row.customerPhoneFormatted || formatPhoneNumber(row.customerPhone))}</a><br>${escapeBrandHtml(row.customerRegion || '')}<br>${escapeBrandHtml(row.preferredTime || '')}${row.memo ? `<br>문의: ${escapeBrandHtml(row.memo)}` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.packageTitle || '-')}</strong>공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')}<br>내부: ${escapeBrandHtml(row.channel || '')} ${escapeBrandHtml(row.branch || '')}<br>${escapeBrandHtml(row.manager || '')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</div></td><td><select data-brand-consult-status><option value="new" ${row.status==='new'?'selected':''}>신규</option><option value="contacted" ${row.status==='contacted'?'selected':''}>고객 연락</option><option value="negotiating" ${row.status==='negotiating'?'selected':''}>계약 진행</option><option value="contracted" ${row.status==='contracted'?'selected':''}>계약 완료</option><option value="cancelled" ${row.status==='cancelled'?'selected':''}>취소</option></select></td><td><input data-brand-contract-amount type="number" min="0" step="1000" value="${Number(row.contractAmount || 0)}" /></td><td><input data-brand-commission-amount type="number" min="0" step="1000" value="${Number(row.commissionAmount || 0)}" /></td><td><select data-brand-settlement-status><option value="unsettled" ${row.settlementStatus==='unsettled'?'selected':''}>미정산</option><option value="pending" ${row.settlementStatus==='pending'?'selected':''}>정산예정</option><option value="settled" ${row.settlementStatus==='settled'?'selected':''}>정산완료</option><option value="waived" ${row.settlementStatus==='waived'?'selected':''}>수수료없음</option></select>${row.settledAt ? `<div class="brand-consult-meta">${brandDate(row.settledAt)}</div>` : ''}</td><td><textarea data-brand-admin-memo maxlength="1200" placeholder="상담 내용, 계약 일정, 정산 메모">${escapeBrandHtml(row.adminMemo || '')}</textarea></td><td><button class="primary-btn brand-consult-save-btn" type="button" data-brand-consult-save="${escapeBrandHtml(row.id)}">저장</button></td></tr>`).join('') : '<tr><td colspan="9"><div class="brand-admin-empty">브랜드관 상담 신청이 없습니다.</div></td></tr>';
+  }
+}
+
 function renderAll() {
   renderStatsCards();
   renderLplanSyncPanel();
   renderCustomerQuotes();
   renderApplications();
   renderApprovedSellers();
+  renderBrandHallAdmin();
   renderSellerAccessLogs();
   renderMessages();
   applyAdminPageView();
@@ -2229,6 +2434,28 @@ document.addEventListener("keydown", (event) => {
 
   event.preventDefault();
   openStatAction(statAction.dataset.statAction);
+});
+
+brandPackageSeller?.addEventListener('change', renderBrandSelectedSeller);
+document.querySelector('#brandPackageResetBtn')?.addEventListener('click', resetBrandPackageForm);
+brandCoverImageInput?.addEventListener('change', () => {
+  const file = brandCoverImageInput.files?.[0];
+  if (!file) { brandCoverDataUrl = ''; return; }
+  if (file.size > 8 * 1024 * 1024) { showToast('대표 이미지는 8MB 이하로 등록해주세요.'); brandCoverImageInput.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = () => { brandCoverDataUrl = String(reader.result || ''); if (brandCoverPreview) brandCoverPreview.innerHTML = `<img src="${escapeBrandHtml(brandCoverDataUrl)}" alt="대표 이미지 미리보기" />`; };
+  reader.onerror = () => showToast('대표 이미지를 읽지 못했습니다.');
+  reader.readAsDataURL(file);
+});
+brandPackageAdminForm?.addEventListener('submit', saveBrandPackageAdmin);
+
+document.addEventListener('click', (event) => {
+  const edit = event.target.closest('[data-brand-package-edit]');
+  if (edit) { editBrandPackage(edit.dataset.brandPackageEdit); return; }
+  const del = event.target.closest('[data-brand-package-delete]');
+  if (del) { deleteBrandPackageAdmin(del.dataset.brandPackageDelete); return; }
+  const consultSave = event.target.closest('[data-brand-consult-save]');
+  if (consultSave) { saveBrandConsultationAdmin(consultSave.dataset.brandConsultSave); return; }
 });
 
 document.addEventListener("click", (event) => {
