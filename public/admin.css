@@ -2381,3 +2381,17 @@ body[data-admin-page="brandHall"] .brand-consult-admin-table-wrap {
   .quote-bid-summary summary { flex-wrap: wrap; }
   .quote-bid-summary summary .quote-selection-summary { margin-left: 0; }
 }
+
+/* Brand Hall V4: required markers + manwon price inputs */
+.brand-package-admin-form .brand-field-label { display: inline-flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.brand-package-admin-form .required-star { color: #e33d46; font-size: 1em; font-weight: 900; line-height: 1; }
+.brand-package-admin-form .brand-price-label-unit { color: #6f7c78; font-weight: 650; font-size: .78rem; }
+.brand-package-admin-form .brand-price-input-wrap { position: relative; display: block; }
+.brand-package-admin-form .brand-price-input-wrap input { padding-right: 52px; }
+.brand-package-admin-form .brand-input-unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #62706c; font-size: .8rem; font-weight: 800; pointer-events: none; }
+.brand-package-admin-form .brand-price-preview { min-height: 18px; color: #7a8783; font-size: .73rem; font-weight: 600; line-height: 1.4; }
+.brand-package-admin-form .brand-price-preview.has-value { color: #0f6656; }
+.brand-package-admin-form label.brand-field-error input,
+.brand-package-admin-form label.brand-field-error select,
+.brand-package-admin-form label.brand-field-error textarea { border-color: #e33d46 !important; box-shadow: 0 0 0 2px rgba(227,61,70,.08); }
+.brand-package-admin-form label.brand-field-error .brand-field-label { color: #b4232c; }

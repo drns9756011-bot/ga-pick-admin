@@ -2143,6 +2143,60 @@ function renderBrandSelectedSeller() {
   brandSelectedSeller.innerHTML = `<strong>고객 공개: ${escapeBrandHtml(publicBrandChannel(seller.channel))}</strong><br>내부 지점: ${escapeBrandHtml(seller.branch || '-')} · 담당지역: ${escapeBrandHtml(seller.branchRegion || '-')}<br>매니저: ${escapeBrandHtml(seller.manager || '-')} ${escapeBrandHtml(seller.managerPosition || '')} · ${escapeBrandHtml(formatPhoneNumber(seller.phone || ''))}`;
 }
 
+function parseBrandManwon(value) {
+  const raw = String(value ?? '').replace(/[,\s]/g, '').replace(/만원|원/g, '').trim();
+  if (!raw) return 0;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) return NaN;
+  return Math.round(amount * 10000);
+}
+
+function formatBrandManwonFromWon(value) {
+  const won = Number(value || 0);
+  if (!Number.isFinite(won) || won <= 0) return '';
+  const manwon = won / 10000;
+  return manwon.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+}
+
+function updateBrandPricePreview(input) {
+  if (!input || !brandPackageAdminForm) return;
+  const preview = brandPackageAdminForm.querySelector(`[data-brand-price-preview="${input.name}"]`);
+  if (!preview) return;
+  const won = parseBrandManwon(input.value);
+  if (!String(input.value || '').trim()) {
+    preview.textContent = input.name === 'salePrice' ? '필수 · 실제 판매 금액을 입력하세요.' : '금액을 입력하면 원 단위로 표시됩니다.';
+    preview.classList.remove('has-value');
+    return;
+  }
+  if (!Number.isFinite(won)) {
+    preview.textContent = '숫자로 입력해주세요. 예: 2,389';
+    preview.classList.remove('has-value');
+    return;
+  }
+  preview.textContent = `= ${brandMoney(won)}`;
+  preview.classList.add('has-value');
+}
+
+function formatBrandManwonInput(input) {
+  if (!input) return;
+  const raw = String(input.value || '').replace(/[,\s]/g, '').trim();
+  if (!raw) return;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) return;
+  input.value = amount.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+  updateBrandPricePreview(input);
+}
+
+function clearBrandPackageFieldErrors() {
+  if (!brandPackageAdminForm) return;
+  brandPackageAdminForm.querySelectorAll('label.brand-field-error').forEach((label) => label.classList.remove('brand-field-error'));
+}
+
+function markBrandPackageFieldError(field) {
+  const label = field?.closest?.('label');
+  if (label) label.classList.add('brand-field-error');
+}
+
 function resetBrandPackageForm() {
   if (!brandPackageAdminForm) return;
   brandPackageAdminForm.reset();
@@ -2150,6 +2204,9 @@ function resetBrandPackageForm() {
   brandCoverDataUrl = '';
   if (brandCoverPreview) brandCoverPreview.textContent = '대표 이미지 미리보기';
   if (brandPackageFormTitle) brandPackageFormTitle.textContent = '패키지 등록';
+  clearBrandPackageFieldErrors();
+  updateBrandPricePreview(brandPackageAdminForm.elements.originalPrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.salePrice);
   renderBrandSellerOptions('');
 }
 
@@ -2162,8 +2219,10 @@ function editBrandPackage(id) {
   brandPackageAdminForm.elements.status.value = row.status || 'active';
   brandPackageAdminForm.elements.title.value = row.title || '';
   brandPackageAdminForm.elements.items.value = Array.isArray(row.items) ? row.items.join('\n') : '';
-  brandPackageAdminForm.elements.originalPrice.value = Number(row.originalPrice || 0) || '';
-  brandPackageAdminForm.elements.salePrice.value = Number(row.salePrice || 0) || '';
+  brandPackageAdminForm.elements.originalPrice.value = formatBrandManwonFromWon(row.originalPrice);
+  brandPackageAdminForm.elements.salePrice.value = formatBrandManwonFromWon(row.salePrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.originalPrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.salePrice);
   brandPackageAdminForm.elements.benefits.value = row.benefits || '';
   brandCoverDataUrl = '';
   if (brandCoverPreview) brandCoverPreview.innerHTML = row.coverImage ? `<img src="${escapeBrandHtml(row.coverImage)}" alt="대표 이미지" />` : '대표 이미지 미리보기';
@@ -2175,21 +2234,41 @@ async function saveBrandPackageAdmin(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const packageId = String(form.elements.packageId.value || '').trim();
+  clearBrandPackageFieldErrors();
+  const originalPrice = parseBrandManwon(form.elements.originalPrice.value);
+  const salePrice = parseBrandManwon(form.elements.salePrice.value);
+  const items = form.elements.items.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
+  const requiredChecks = [
+    [form.elements.sellerId, Boolean(form.elements.sellerId.value), '연결 판매자'],
+    [form.elements.brand, Boolean(form.elements.brand.value), '브랜드'],
+    [form.elements.title, Boolean(form.elements.title.value.trim()), '패키지명'],
+    [form.elements.items, Boolean(items.length), '제품 구성'],
+    [form.elements.salePrice, Number.isFinite(salePrice) && salePrice > 0, '판매가'],
+  ];
+  const missing = requiredChecks.filter(([, valid]) => !valid);
+  if (missing.length) {
+    missing.forEach(([field]) => markBrandPackageFieldError(field));
+    missing[0]?.[0]?.focus?.();
+    showToast(`필수 항목을 확인해주세요: ${missing.map(([, , name]) => name).join(', ')}`);
+    return;
+  }
+  if (!Number.isFinite(originalPrice)) {
+    markBrandPackageFieldError(form.elements.originalPrice);
+    form.elements.originalPrice.focus();
+    showToast('정상가는 숫자로 입력해주세요. 금액 입력 단위는 만원입니다.');
+    return;
+  }
   const payload = {
     sellerId: form.elements.sellerId.value,
     brand: form.elements.brand.value,
     status: form.elements.status.value,
     title: form.elements.title.value.trim(),
-    items: form.elements.items.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean),
-    originalPrice: Number(form.elements.originalPrice.value || 0),
-    salePrice: Number(form.elements.salePrice.value || 0),
+    items,
+    originalPrice,
+    salePrice,
     benefits: form.elements.benefits.value.trim(),
     coverImageDataUrl: brandCoverDataUrl,
   };
-  if (!payload.sellerId || !payload.brand || !payload.title || !payload.items.length || !payload.salePrice) {
-    showToast('연결 판매자, 브랜드, 패키지명, 제품 구성, 판매가는 필수입니다.');
-    return;
-  }
   setAdminLoading(true, '브랜드관 패키지를 서버에 저장하는 중입니다.', '이미지와 판매처 정보를 함께 반영하고 있습니다.');
   try {
     const result = await apiJson(packageId ? `/api/brand-hall/packages/${encodeURIComponent(packageId)}` : '/api/brand-hall/packages', {
@@ -2455,6 +2534,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 brandPackageSeller?.addEventListener('change', renderBrandSelectedSeller);
+brandPackageAdminForm?.elements.originalPrice?.addEventListener('input', (event) => { event.currentTarget.closest('label')?.classList.remove('brand-field-error'); updateBrandPricePreview(event.currentTarget); });
+brandPackageAdminForm?.elements.salePrice?.addEventListener('input', (event) => { event.currentTarget.closest('label')?.classList.remove('brand-field-error'); updateBrandPricePreview(event.currentTarget); });
+brandPackageAdminForm?.elements.originalPrice?.addEventListener('blur', (event) => formatBrandManwonInput(event.currentTarget));
+brandPackageAdminForm?.elements.salePrice?.addEventListener('blur', (event) => formatBrandManwonInput(event.currentTarget));
+brandPackageAdminForm?.querySelectorAll('[required]').forEach((field) => {
+  const clear = () => field.closest('label')?.classList.remove('brand-field-error');
+  field.addEventListener('input', clear);
+  field.addEventListener('change', clear);
+});
+
 document.querySelector('#brandPackageResetBtn')?.addEventListener('click', resetBrandPackageForm);
 brandCoverImageInput?.addEventListener('change', () => {
   const file = brandCoverImageInput.files?.[0];
