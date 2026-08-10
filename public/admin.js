@@ -892,6 +892,25 @@ async function syncApprovedSellerUpdateToServer(sellerId, payload) {
   return true;
 }
 
+async function syncApprovedSellerQuoteAlimtalkOptOutToServer(sellerId, quoteAlimtalkOptOut) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quoteAlimtalkOptOut: Boolean(quoteAlimtalkOptOut) }),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "신규 견적 알림톡 수신 설정 변경에 실패했습니다.");
+    return false;
+  }
+
+  const sellers = getApprovedSellers().map((seller) =>
+    seller.id === sellerId ? { ...seller, ...result.row } : seller
+  );
+  setApprovedSellers(sellers);
+  renderAll();
+  return true;
+}
+
 async function syncApprovedSellerDeleteToServer(sellerId) {
   const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
@@ -1525,12 +1544,6 @@ async function queueManualApplicationTalk(applicationId) {
 
 function renderApprovedSellers() {
   const approved = getApprovedSellers();
-  const headerRow = approvedSellerRows.closest("table")?.querySelector("thead tr");
-  if (headerRow && headerRow.children.length < 5) {
-    const manageHeader = document.createElement("th");
-    manageHeader.textContent = "관리";
-    headerRow.appendChild(manageHeader);
-  }
 
   approvedSellerRows.innerHTML = approved.length
     ? approved.map((seller) => `
@@ -1540,6 +1553,16 @@ function renderApprovedSellers() {
         <td>${escapeHTML(seller.branchRegion || "지역 미등록")}</td>
         <td>${escapeHTML(seller.sellerId || "-")}</td>
         <td>
+          <label class="alimtalk-optout-control" title="체크하면 신규 고객 견적 알림톡이 발송되지 않습니다.">
+            <input
+              type="checkbox"
+              data-quote-alimtalk-optout="${escapeHTML(seller.id)}"
+              ${seller.quoteAlimtalkOptOut ? "checked" : ""}
+            />
+            <span>${seller.quoteAlimtalkOptOut ? "수신거부" : "수신중"}</span>
+          </label>
+        </td>
+        <td>
           <div class="table-actions">
             <button class="plain-btn small-btn" type="button" data-edit-approved-seller="${escapeHTML(seller.id)}">정보 수정</button>
             <button class="plain-btn small-btn" type="button" data-reset-approved-password="${escapeHTML(seller.id)}">비밀번호 초기화</button>
@@ -1548,7 +1571,7 @@ function renderApprovedSellers() {
         </td>
       </tr>
     `).join("")
-    : `<tr><td colspan="5">아직 승인된 판매자가 없습니다.</td></tr>`;
+    : `<tr><td colspan="6">아직 승인된 판매자가 없습니다.</td></tr>`;
 }
 
 const ADMIN_QUOTE_RECEIVE_HOURS = 72;
@@ -2507,6 +2530,24 @@ document.addEventListener("input", (event) => {
 });
 
 editCustomerQuoteForm?.addEventListener("submit", submitCustomerQuoteEdit);
+document.addEventListener("change", async (event) => {
+  const checkbox = event.target.closest?.("[data-quote-alimtalk-optout]");
+  if (!checkbox) return;
+
+  const sellerId = checkbox.dataset.quoteAlimtalkOptout;
+  const nextOptOut = Boolean(checkbox.checked);
+  checkbox.disabled = true;
+  const ok = await syncApprovedSellerQuoteAlimtalkOptOutToServer(sellerId, nextOptOut);
+  if (!ok) {
+    checkbox.checked = !nextOptOut;
+    checkbox.disabled = false;
+    return;
+  }
+  showToast(nextOptOut
+    ? "이 판매자는 신규 견적 알림톡 수신거부로 설정했습니다."
+    : "이 판매자의 신규 견적 알림톡 수신을 다시 허용했습니다.");
+});
+
 editApprovedSellerForm?.addEventListener("submit", submitApprovedSellerEdit);
 adminTextModalForm?.addEventListener("submit", (event) => {
   event.preventDefault();

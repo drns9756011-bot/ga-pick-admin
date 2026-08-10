@@ -176,6 +176,7 @@ function normalizeApprovedSeller(row) {
     reviewedAt: row.reviewed_at || "",
     reviewMemo: row.review_memo || "",
     approvedAt: row.approved_at || "",
+    quoteAlimtalkOptOut: Number(row.quote_alimtalk_opt_out || 0) === 1,
   };
 }
 
@@ -735,7 +736,8 @@ async function ensureSellerTablesAndColumns(env) {
       requested_at TEXT DEFAULT '',
       reviewed_at TEXT DEFAULT '',
       review_memo TEXT DEFAULT '',
-      approved_at TEXT DEFAULT ''
+      approved_at TEXT DEFAULT '',
+      quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0
     )`
   ).run();
 
@@ -773,6 +775,7 @@ async function ensureSellerTablesAndColumns(env) {
     "ALTER TABLE approved_sellers ADD COLUMN reviewed_at TEXT DEFAULT ''",
     "ALTER TABLE approved_sellers ADD COLUMN review_memo TEXT DEFAULT ''",
     "ALTER TABLE approved_sellers ADD COLUMN approved_at TEXT DEFAULT ''",
+    "ALTER TABLE approved_sellers ADD COLUMN quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0",
   ];
 
   for (const statement of statements) {
@@ -1389,6 +1392,11 @@ async function updateApprovedSeller(env, request, id) {
     values.push(String(body.memo || "").trim());
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "quoteAlimtalkOptOut")) {
+    updates.push("quote_alimtalk_opt_out = ?");
+    values.push(body.quoteAlimtalkOptOut ? 1 : 0);
+  }
+
   if (!updates.length) {
     return json({ ok: false, message: "변경할 정보가 없습니다." }, 400);
   }
@@ -1521,6 +1529,27 @@ async function resendAlimtalk(env, id) {
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
   if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
+
+  if (row.type === "seller-quote-registered") {
+    await ensureSellerTablesAndColumns(env);
+    const targetPhone = normalizePhone(row.targetPhone || "");
+    if (targetPhone) {
+      const blockedSeller = await env.DB.prepare(
+        `SELECT id FROM approved_sellers
+          WHERE status = 'approved'
+            AND COALESCE(quote_alimtalk_opt_out, 0) = 1
+            AND REPLACE(REPLACE(COALESCE(phone, ''), '-', ''), ' ', '') = ?
+          LIMIT 1`
+      ).bind(targetPhone).first();
+      if (blockedSeller) {
+        return json({
+          ok: false,
+          blocked: true,
+          message: "이 판매자는 신규 견적 알림톡 수신거부 상태라 재발송하지 않았습니다.",
+        }, 409);
+      }
+    }
+  }
 
   const templateId = row.templateId || getSolapiTemplateId(env, row.type || "notice");
   const result = await sendSolapiAlimtalk(env, row, templateId).catch((error) => ({

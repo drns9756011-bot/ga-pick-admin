@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS approved_sellers (
   requested_at TEXT DEFAULT '',
   reviewed_at TEXT DEFAULT '',
   review_memo TEXT DEFAULT '',
-  approved_at TEXT NOT NULL
+  approved_at TEXT NOT NULL,
+  quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_approved_sellers_seller_id ON approved_sellers(seller_id);

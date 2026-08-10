@@ -2395,3 +2395,26 @@ body[data-admin-page="brandHall"] .brand-consult-admin-table-wrap {
 .brand-package-admin-form label.brand-field-error select,
 .brand-package-admin-form label.brand-field-error textarea { border-color: #e33d46 !important; box-shadow: 0 0 0 2px rgba(227,61,70,.08); }
 .brand-package-admin-form label.brand-field-error .brand-field-label { color: #b4232c; }
+
+
+/* 신규 견적 알림톡 수신 설정 */
+.alimtalk-optout-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 92px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  color: #196b5e;
+  user-select: none;
+}
+.alimtalk-optout-control input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #c75146;
+  cursor: pointer;
+}
+.alimtalk-optout-control input:checked + span { color: #b13c35; }
+.alimtalk-optout-control input:disabled { cursor: wait; opacity: .55; }
