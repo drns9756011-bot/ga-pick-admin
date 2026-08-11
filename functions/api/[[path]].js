@@ -994,6 +994,8 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN desired_brand TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN contact_release_scope TEXT DEFAULT 'selected'",
     "ALTER TABLE customer_quotes ADD COLUMN contact_released_bid_ids TEXT DEFAULT '[]'",
+    "ALTER TABLE customer_quotes ADD COLUMN sale_completed_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN rank_notice_queued_at TEXT DEFAULT ''",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];
@@ -1044,6 +1046,66 @@ async function getCustomerQuotes(env) {
   }
 
   return json({ ok: true, rows });
+}
+
+
+async function deleteBidAdmin(env, bidIdValue) {
+  await ensureCustomerQuoteColumns(env);
+  const bidId = String(bidIdValue || "").trim();
+  if (!bidId) return json({ ok: false, message: "삭제할 제안 정보가 필요합니다." }, 400);
+
+  const bid = await env.DB.prepare("SELECT * FROM bids WHERE id = ? LIMIT 1").bind(bidId).first();
+  if (!bid) return json({ ok: false, message: "삭제할 판매자 제안을 찾을 수 없습니다." }, 404);
+
+  const quoteId = String(bid.quote_id || "").trim();
+  const quote = quoteId
+    ? await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(quoteId).first()
+    : null;
+
+  try {
+    await env.DB.prepare("DELETE FROM reviews WHERE bid_id = ?").bind(bidId).run();
+  } catch (error) {
+    // reviews 테이블이 없거나 이미 정리된 경우에도 제안 삭제는 계속 진행합니다.
+  }
+
+  await env.DB.prepare("DELETE FROM bids WHERE id = ?").bind(bidId).run();
+  const verify = await env.DB.prepare("SELECT id FROM bids WHERE id = ? LIMIT 1").bind(bidId).first();
+  if (verify?.id) return json({ ok: false, message: "판매자 제안이 서버에서 삭제되지 않았습니다." }, 500);
+
+  if (quote) {
+    const currentReleasedIds = parseJson(quote.contact_released_bid_ids, []).map((value) => String(value || ""));
+    const releasedIds = currentReleasedIds.filter((value) => value && value !== bidId);
+    const wasSelected = String(quote.selected_bid_id || "") === bidId;
+
+    if (wasSelected) {
+      const now = new Date();
+      const expiresAt = quote.quote_expires_at ? new Date(quote.quote_expires_at) : null;
+      const canReopen = expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > now.getTime();
+
+      await env.DB.prepare(
+        `UPDATE customer_quotes
+         SET selected_bid_id = '', contact_release_scope = 'selected', contact_released_bid_ids = '[]',
+             sale_completed_at = '', status = ?, rank_notice_queued_at = ''
+         WHERE id = ?`
+      ).bind(canReopen ? "open" : "closed", quoteId).run();
+    } else if (releasedIds.length !== currentReleasedIds.length) {
+      await env.DB.prepare(
+        "UPDATE customer_quotes SET contact_released_bid_ids = ? WHERE id = ?"
+      ).bind(JSON.stringify(releasedIds), quoteId).run();
+    }
+  }
+
+  let updatedQuote = null;
+  if (quoteId) {
+    const nextQuote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(quoteId).first();
+    if (nextQuote) {
+      const images = await getQuoteImages(env, quoteId);
+      const bids = await getQuoteBids(env, quoteId);
+      updatedQuote = normalizeCustomerQuote({ ...nextQuote, bid_count: bids.length, bids }, images);
+    }
+  }
+
+  return json({ ok: true, deletedBidId: bidId, quoteId, row: updatedQuote });
 }
 
 async function getDeletedQuoteLogs(env) {
@@ -2104,6 +2166,9 @@ export async function onRequest(context) {
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
+  if (path.startsWith("bids/") && method === "DELETE") {
+    return deleteBidAdmin(env, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
   if (path.startsWith("customer-quotes/") && path.endsWith("/images") && method === "POST") {

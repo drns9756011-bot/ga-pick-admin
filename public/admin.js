@@ -1040,6 +1040,43 @@ async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
   return true;
 }
 
+
+async function deleteManagerBidFromServer(bidId, quoteId, label = "판매자 제안") {
+  const confirmed = window.confirm(`${label}을(를) 서버에서 삭제하시겠습니까?\n삭제한 제안은 복구할 수 없습니다.`);
+  if (!confirmed) return false;
+
+  const result = await apiJson(`/api/bids/${encodeURIComponent(bidId)}`, {
+    method: "DELETE",
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "판매자 제안 삭제에 실패했습니다.");
+    return false;
+  }
+
+  const targetQuoteId = String(quoteId || result.quoteId || "");
+  const updatedQuotes = getCustomerQuotes().map((quote) => {
+    if (String(quote.id || "") !== targetQuoteId) return quote;
+    if (result.row) return { ...quote, ...result.row };
+
+    const nextBids = (Array.isArray(quote.bids) ? quote.bids : [])
+      .filter((bid) => String(bid.id || "") !== String(bidId));
+    return {
+      ...quote,
+      bids: nextBids,
+      bidCount: nextBids.length,
+      selectedBidId: String(quote.selectedBidId || "") === String(bidId) ? null : quote.selectedBidId,
+      contactReleasedBidIds: (Array.isArray(quote.contactReleasedBidIds) ? quote.contactReleasedBidIds : [])
+        .filter((id) => String(id || "") !== String(bidId)),
+    };
+  });
+
+  writeStorageArray(STORAGE_KEYS.customerQuotes, updatedQuotes);
+  renderAll();
+  showToast("판매자 제안을 서버에서 삭제했습니다.");
+  return true;
+}
+
 function getMessages() {
   return readStorageArray(STORAGE_KEYS.alimtalkQueue);
 }
@@ -1695,7 +1732,13 @@ function renderQuoteBidSummary(quote) {
                         <small>${escapeHTML(formatPhoneNumber(bid.phone) || "연락처 미입력")}</small>
                       </div>
                       <p>${escapeHTML(bid.benefits || "제공 조건 미입력")}</p>
-                      ${isSelected ? `<em>고객님 직접 선택</em>` : isContactReleased ? `<em class="contact-released">연락처 공개 대상</em>` : ""}
+                      <div class="quote-bid-row-actions">
+                        ${isSelected ? `<em>고객님 직접 선택</em>` : isContactReleased ? `<em class="contact-released">연락처 공개 대상</em>` : ""}
+                        <button class="danger-btn small-btn" type="button"
+                          data-delete-manager-bid="${escapeHTML(String(bid.id || ""))}"
+                          data-delete-manager-bid-quote="${escapeHTML(String(quote.id || ""))}"
+                          data-delete-manager-bid-label="${escapeHTML(managerLabel || branchLabel || "판매자 제안")}">제안 삭제</button>
+                      </div>
                     </article>
                   `;
                 })
@@ -2486,6 +2529,16 @@ document.addEventListener("click", (event) => {
   const deleteApprovedSellerButton = event.target.closest("[data-delete-approved-seller]");
   if (deleteApprovedSellerButton) {
     deleteApprovedSeller(deleteApprovedSellerButton.dataset.deleteApprovedSeller);
+    return;
+  }
+
+  const deleteManagerBidButton = event.target.closest("[data-delete-manager-bid]");
+  if (deleteManagerBidButton) {
+    deleteManagerBidFromServer(
+      deleteManagerBidButton.dataset.deleteManagerBid,
+      deleteManagerBidButton.dataset.deleteManagerBidQuote,
+      deleteManagerBidButton.dataset.deleteManagerBidLabel
+    );
     return;
   }
 

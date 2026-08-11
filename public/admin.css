@@ -906,6 +906,22 @@ button.application-card.is-active {
   white-space: nowrap;
 }
 
+.quote-bid-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quote-bid-row-actions em {
+  justify-self: auto;
+}
+
+.quote-bid-row-actions .danger-btn {
+  white-space: nowrap;
+}
+
 .quote-bid-empty {
   margin: 0;
   padding: 0 12px 12px;
@@ -2027,6 +2043,10 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
 
   .quote-bid-row em {
     justify-self: start;
+  }
+
+  .quote-bid-row-actions {
+    justify-content: flex-start;
   }
 }
 
