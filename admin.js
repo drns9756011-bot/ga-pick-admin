@@ -10,8 +10,15 @@ const STORAGE_KEYS = {
   sellerAccessSummary: "pickquoteSellerAccessSummary",
   adminLastRefreshedAt: "pickquoteAdminLastRefreshedAt",
   adminApiToken: "pickquoteAdminApiToken",
+  brandPackages: "pickquoteBrandPackagesAdmin",
+  brandConsultations: "pickquoteBrandConsultationsAdmin",
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
+
+// 마지막으로 정상 조회한 서버 데이터는 화면 표시용 스냅샷으로 유지합니다.
+// 메뉴 이동이나 페이지 재실행만으로 서버를 다시 조회하지 않으며,
+// 사용자가 상단 새로고침을 눌렀을 때만 새 데이터로 교체합니다.
+
 
 let applicationFilter = "pending";
 let messageFilter = "all";
@@ -23,6 +30,7 @@ let lplanSyncing = false;
 let lplanLastCheckedAt = "";
 let adminQuoteCountdownTimer = 0;
 let adminQuoteSummaryKey = "";
+let customerQuoteSearchTerm = "";
 const SELLER_CHANNELS = [
   "LG전자 BEST SHOP",
   "롯데하이마트",
@@ -46,6 +54,7 @@ const sellerAccessDays = document.querySelector("#sellerAccessDays");
 const messageList = document.querySelector("#messageList");
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
+const adminAuthBtn = document.querySelector("#adminAuthBtn");
 const adminActions = document.querySelector(".admin-actions");
 const adminLastUpdated = document.createElement("span");
 adminLastUpdated.className = "admin-last-updated";
@@ -57,6 +66,18 @@ const adminHeaderCopy = document.querySelector(".header-copy");
 const adminLoadingModal = document.querySelector("#adminLoadingModal");
 const adminLoadingTitle = document.querySelector("#adminLoadingTitle");
 const adminLoadingText = document.querySelector("#adminLoadingText");
+const brandHallPanel = document.querySelector("#brandHallPanel");
+const brandPackageAdminForm = document.querySelector("#brandPackageAdminForm");
+const brandPackageSeller = document.querySelector("#brandPackageSeller");
+const brandSelectedSeller = document.querySelector("#brandSelectedSeller");
+const brandAdminPackageList = document.querySelector("#brandAdminPackageList");
+const brandPackageAdminCount = document.querySelector("#brandPackageAdminCount");
+const brandConsultAdminRows = document.querySelector("#brandConsultAdminRows");
+const brandConsultAdminCount = document.querySelector("#brandConsultAdminCount");
+const brandCoverImageInput = document.querySelector("#brandCoverImageInput");
+const brandCoverPreview = document.querySelector("#brandCoverPreview");
+const brandPackageFormTitle = document.querySelector("#brandPackageFormTitle");
+let brandCoverDataUrl = "";
 let adminLoadingCount = 0;
 document.querySelector(".home-link")?.setAttribute("href", "https://ga-pick.com/");
 document.querySelector(".home-link")?.setAttribute("target", "_blank");
@@ -94,6 +115,13 @@ const ADMIN_PAGE_CONFIG = {
     copy: "채널, 지점, 매니저, 직책, 비밀번호 초기화와 계정 삭제를 관리합니다.",
     visible: ["statGrid", "adminSecondaryGrid", "approvedSellers"],
   },
+  brandHall: {
+    path: "/brand-hall",
+    title: "브랜드관 관리",
+    heading: "브랜드관 패키지와 상담·정산을 직접 관리하세요.",
+    copy: "고객에게는 채널만 노출하고, 실제 지점과 매니저 정보는 관리자 화면에서만 사용합니다.",
+    visible: ["statGrid", "brandHallPanel"],
+  },
   sellerAccess: {
     path: "/seller-access",
     title: "판매자 접속 기록",
@@ -120,6 +148,7 @@ const ADMIN_SECTION_IDS = [
   "applicationDetail",
   "adminSecondaryGrid",
   "approvedSellers",
+  "brandHallPanel",
   "sellerAccessPanel",
   "alimtalkControl",
 ];
@@ -129,6 +158,7 @@ function adminPageKeyFromPath(pathname) {
   if (normalized === "/customers") return "customers";
   if (normalized === "/sellers") return "sellers";
   if (normalized === "/approved-sellers") return "approvedSellers";
+  if (normalized === "/brand-hall") return "brandHall";
   if (normalized === "/seller-access") return "sellerAccess";
   if (normalized === "/alimtalk") return "alimtalk";
   return "dashboard";
@@ -182,7 +212,10 @@ function applyAdminPageView() {
   const config = ADMIN_PAGE_CONFIG[pageKey] || ADMIN_PAGE_CONFIG.dashboard;
   document.body.dataset.adminPage = pageKey;
   document.title = `픽견적 관리자 · ${config.title}`;
-  if (adminShell) adminShell.id = pageKey;
+  if (adminShell) {
+    adminShell.id = "adminShell";
+    adminShell.dataset.page = pageKey;
+  }
   if (adminHeaderTitle) adminHeaderTitle.textContent = config.heading;
   if (adminHeaderCopy) adminHeaderCopy.textContent = config.copy;
 
@@ -211,6 +244,14 @@ customerQuoteSection.innerHTML = `
     </div>
     <p class="panel-note">고객 견적 저장 여부와 알림톡 발송 상태를 확인합니다.</p>
   </div>
+  <div class="customer-quote-search" role="search" aria-label="고객 견적 검색">
+    <label for="customerQuoteSearch">견적 검색</label>
+    <div class="customer-quote-search-row">
+      <input id="customerQuoteSearch" type="search" inputmode="search" autocomplete="off" placeholder="견적번호, 고객명, 휴대전화번호 검색" />
+      <button class="plain-btn" id="customerQuoteSearchClear" type="button" hidden>검색 초기화</button>
+    </div>
+    <p id="customerQuoteSearchSummary" aria-live="polite">전체 견적을 표시합니다.</p>
+  </div>
   <div class="quote-admin-list" id="customerQuoteList"></div>
   <div class="deleted-quote-log">
     <h3>삭제된 견적 기록</h3>
@@ -219,6 +260,9 @@ customerQuoteSection.innerHTML = `
 `;
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
+const customerQuoteSearch = document.querySelector("#customerQuoteSearch");
+const customerQuoteSearchClear = document.querySelector("#customerQuoteSearchClear");
+const customerQuoteSearchSummary = document.querySelector("#customerQuoteSearchSummary");
 const deletedQuoteList = document.querySelector("#deletedQuoteList");
 
 const lplanSyncSection = document.createElement("section");
@@ -405,9 +449,10 @@ function openAdminTextModal(options = {}) {
 
 let adminTokenRequestPromise = null;
 
-async function requestAdminApiToken() {
+async function requestAdminApiToken(force = false) {
   const current = readAdminApiToken();
-  if (current) return current;
+  if (current && !force) return current;
+  if (force) localStorage.removeItem(STORAGE_KEYS.adminApiToken);
   if (adminTokenRequestPromise) return adminTokenRequestPromise;
 
   adminTokenRequestPromise = (async () => {
@@ -463,14 +508,35 @@ async function apiJson(path, options = {}) {
       headers,
       ...fetchOptions,
     });
+    const payload = response.status === 204
+      ? null
+      : await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 401) localStorage.removeItem(STORAGE_KEYS.adminApiToken);
-      throw new Error(`api request failed: ${response.status}`);
+      if (response.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.adminApiToken);
+        if (!options.__retriedAfterAuth) {
+          setAdminLoading(false);
+          const renewedToken = await requestAdminApiToken(true);
+          if (renewedToken) {
+            return apiJson(path, { ...options, __retriedAfterAuth: true });
+          }
+        }
+      }
+      const message = payload?.message || `서버 요청에 실패했습니다. (${response.status})`;
+      if (response.status === 503 && payload?.code === "ADMIN_TOKEN_NOT_CONFIGURED") {
+        showToast("Cloudflare 관리자 Worker의 ADMIN_API_TOKEN Secret을 다시 설정해주세요.");
+      }
+      return {
+        ok: false,
+        status: response.status,
+        code: payload?.code || "",
+        message,
+      };
     }
-    return response.status === 204 ? null : response.json();
+    return payload;
   } catch (error) {
     console.warn("API 요청에 실패했습니다.", error);
-    return null;
+    return { ok: false, message: "관리자 서버에 연결하지 못했습니다." };
   } finally {
     if (!silent) setAdminLoading(false);
   }
@@ -479,92 +545,42 @@ async function apiJson(path, options = {}) {
 async function loadAlimtalkMessagesFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicMessages = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk?ts=${timestamp}`, requestOptions);
-  if (publicMessages?.ok && Array.isArray(publicMessages.rows)) {
+  const result = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
+  if (result?.ok && Array.isArray(result.rows)) {
     messageSyncError = "";
-    return publicMessages;
+    return result;
   }
-
-  const localMessages = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
-  if (localMessages?.ok && Array.isArray(localMessages.rows)) {
-    messageSyncError = "";
-    return localMessages;
-  }
-
-  messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
-  return null;
+  messageSyncError = result?.message || "알림톡 기록을 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function loadCustomerQuotesFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicQuotes = await apiJson(`${PUBLIC_API_BASE}/api/customer-quotes?ts=${timestamp}`, requestOptions);
-  if (publicQuotes?.ok && Array.isArray(publicQuotes.rows)) {
+  const result = await apiJson(`/api/customer-quotes?ts=${timestamp}`, requestOptions);
+  if (result?.ok && Array.isArray(result.rows)) {
     customerQuoteSyncError = "";
-    return publicQuotes;
+    return result;
   }
-
-  const localQuotes = await apiJson(`/api/customer-quotes?ts=${timestamp}`, requestOptions);
-  if (localQuotes?.ok && Array.isArray(localQuotes.rows)) {
-    customerQuoteSyncError = "";
-    return localQuotes;
-  }
-
-  customerQuoteSyncError = "고객 견적을 서버에서 불러오지 못했습니다. 관리자 API와 노출용 API 연결 상태를 확인해주세요.";
-  return null;
+  customerQuoteSyncError = result?.message || "고객 견적을 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function loadSellerApplicationsFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicApplications = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications?ts=${timestamp}`, requestOptions);
-  if (publicApplications?.ok && Array.isArray(publicApplications.rows)) {
-    return publicApplications;
-  }
-
   return apiJson(`/api/seller-applications?ts=${timestamp}`, requestOptions);
 }
 
 async function loadApprovedSellersFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-
-  // 관리자용 API를 기준 데이터로 먼저 확인합니다. 노출용 API가 일시적으로
-  // 빈 목록을 반환해도 관리자 목록이 통째로 사라지지 않도록 두 결과를 병합합니다.
-  const [adminSellers, publicSellers] = await Promise.all([
-    apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions),
-    apiJson(`${PUBLIC_API_BASE}/api/approved-sellers?ts=${timestamp}`, requestOptions),
-  ]);
-
-  const adminRows = adminSellers?.ok && Array.isArray(adminSellers.rows) ? adminSellers.rows : [];
-  const publicRows = publicSellers?.ok && Array.isArray(publicSellers.rows) ? publicSellers.rows : [];
-  const merged = new Map();
-
-  [...publicRows, ...adminRows].forEach((seller) => {
-    const key = String(seller?.sellerId || seller?.seller_id || seller?.id || "").trim();
-    if (!key) return;
-    merged.set(key, seller);
-  });
-
-  if (adminSellers?.ok || publicSellers?.ok) {
-    return {
-      ok: true,
-      rows: Array.from(merged.values()),
-      sources: {
-        admin: adminRows.length,
-        public: publicRows.length,
-      },
-    };
-  }
-
-  return adminSellers || publicSellers || null;
+  return apiJson(`/api/approved-sellers?ts=${timestamp}`, requestOptions);
 }
 
 async function loadVisitStatsFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicStats = await apiJson(`${PUBLIC_API_BASE}/api/visit-stats?ts=${timestamp}`, requestOptions);
-  if (publicStats?.ok) return publicStats;
   return apiJson(`/api/visit-stats?ts=${timestamp}`, requestOptions);
 }
 
@@ -572,32 +588,27 @@ async function loadSellerAccessLogsFromServer(options = {}) {
   const timestamp = Date.now();
   const days = Math.min(365, Math.max(1, Number(options.days || sellerAccessDays?.value || 30) || 30));
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicLogs = await apiJson(`${PUBLIC_API_BASE}/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
-  if (publicLogs?.ok && Array.isArray(publicLogs.rows)) return publicLogs;
   return apiJson(`/api/seller-access-logs?days=${days}&limit=500&ts=${timestamp}`, requestOptions);
+}
+
+async function loadBrandHallFromServer(options = {}) {
+  const timestamp = Date.now();
+  const requestOptions = options.silent ? { silent: true } : {};
+  return apiJson(`/api/brand-hall?ts=${timestamp}`, requestOptions);
 }
 
 async function loadLplanTrainingFromServer(options = {}) {
   const timestamp = Date.now();
   const limit = Math.min(100, Math.max(1, Number(options.limit || 50) || 50));
   const requestOptions = options.silent ? { silent: true } : {};
-  const publicTraining = await apiJson(`${PUBLIC_API_BASE}/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
-  if (publicTraining?.ok && Array.isArray(publicTraining.rows)) {
-    lplanSyncError = "";
-    lplanLastCheckedAt = new Date().toISOString();
-    return publicTraining;
-  }
-
-  const localTraining = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
-  if (localTraining?.ok && Array.isArray(localTraining.rows)) {
-    lplanSyncError = "";
-    lplanLastCheckedAt = new Date().toISOString();
-    return localTraining;
-  }
-
-  lplanSyncError = "엘플랜 동기화 데이터를 불러오지 못했습니다. 엘플랜 저장 API와 관리자 DB 연결을 확인해주세요.";
+  const result = await apiJson(`/api/lplan-training-quotes?limit=${limit}&ts=${timestamp}`, requestOptions);
   lplanLastCheckedAt = new Date().toISOString();
-  return null;
+  if (result?.ok && Array.isArray(result.rows)) {
+    lplanSyncError = "";
+    return result;
+  }
+  lplanSyncError = result?.message || "엘플랜 동기화 데이터를 관리자 서버에서 불러오지 못했습니다.";
+  return result || null;
 }
 
 async function forceLplanTrainingSync() {
@@ -618,19 +629,35 @@ async function forceLplanTrainingSync() {
   renderAll();
 }
 
+function clearCurrentAdminData() {
+  writeStorageArray(STORAGE_KEYS.sellerApplications, []);
+  writeStorageArray(STORAGE_KEYS.approvedSellers, []);
+  writeStorageArray(STORAGE_KEYS.alimtalkQueue, []);
+  writeStorageArray(STORAGE_KEYS.customerQuotes, []);
+  writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, []);
+  writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, []);
+  writeStorageArray(STORAGE_KEYS.sellerAccessLogs, []);
+  writeStorageArray(STORAGE_KEYS.brandPackages, []);
+  writeStorageArray(STORAGE_KEYS.brandConsultations, []);
+  localStorage.removeItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`);
+  localStorage.removeItem(STORAGE_KEYS.visitStats);
+  localStorage.removeItem(STORAGE_KEYS.sellerAccessSummary);
+}
+
 async function loadAdminDataFromServer(options = {}) {
   const silent = Boolean(options.silent);
   const token = await requestAdminApiToken();
   if (!token) {
     updateLastRefreshedDisplay();
-    return;
+    return { ok: false, message: "관리자 API 토큰이 필요합니다." };
   }
   if (!silent) {
     setAdminLoading(true, "관리자 데이터를 한 번에 불러오는 중입니다.", "최신 운영 정보와 방문자 통계를 확인하고 있습니다.");
   }
+
   try {
     const requestOptions = { silent: true };
-    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess] = await Promise.all([
+    const results = await Promise.all([
       loadSellerApplicationsFromServer(requestOptions),
       loadApprovedSellersFromServer(requestOptions),
       loadAlimtalkMessagesFromServer(requestOptions),
@@ -639,82 +666,138 @@ async function loadAdminDataFromServer(options = {}) {
       loadLplanTrainingFromServer({ silent: true, limit: 100 }),
       loadVisitStatsFromServer(requestOptions),
       loadSellerAccessLogsFromServer({ silent: true }),
+      loadBrandHallFromServer({ silent: true }),
     ]);
 
-    if (applications?.ok && Array.isArray(applications.rows)) writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
-    if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
-    if (messages?.ok && Array.isArray(messages.rows)) writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
-    if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
-    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
-    if (visitStats?.ok) localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess, brandHall] = results;
+    const authFailure = results.find((result) =>
+      result && result.ok === false && [401, 503].includes(Number(result.status || 0))
+    );
+
+    if (authFailure) {
+      const message = authFailure.message || "관리자 인증 설정을 확인해주세요.";
+      showToast(message);
+      renderAll();
+      updateLastRefreshedDisplay();
+      return { ok: false, message };
+    }
+
+    let updatedCount = 0;
+    if (applications?.ok && Array.isArray(applications.rows)) {
+      writeStorageArray(STORAGE_KEYS.sellerApplications, applications.rows);
+      updatedCount += 1;
+    }
+    if (approvedSellers?.ok && Array.isArray(approvedSellers.rows)) {
+      writeStorageArray(STORAGE_KEYS.approvedSellers, approvedSellers.rows);
+      updatedCount += 1;
+    }
+    if (messages?.ok && Array.isArray(messages.rows)) {
+      writeStorageArray(STORAGE_KEYS.alimtalkQueue, messages.rows);
+      updatedCount += 1;
+    }
+    if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
+      writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
+      updatedCount += 1;
+    }
+    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) {
+      writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
+      updatedCount += 1;
+    }
+    if (visitStats?.ok) {
+      localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
+      updatedCount += 1;
+    }
     if (sellerAccess?.ok && Array.isArray(sellerAccess.rows)) {
       writeStorageArray(STORAGE_KEYS.sellerAccessLogs, sellerAccess.rows);
       localStorage.setItem(STORAGE_KEYS.sellerAccessSummary, JSON.stringify(sellerAccess.summary || {}));
+      updatedCount += 1;
+    }
+    if (brandHall?.ok) {
+      if (Array.isArray(brandHall.packages)) writeStorageArray(STORAGE_KEYS.brandPackages, brandHall.packages);
+      if (Array.isArray(brandHall.consultations)) writeStorageArray(STORAGE_KEYS.brandConsultations, brandHall.consultations);
+      updatedCount += 1;
     }
     if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
       writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, lplanTraining.rows);
       if (lplanTraining.summary) {
         localStorage.setItem(`${STORAGE_KEYS.lplanTrainingQuotes}:summary`, JSON.stringify(lplanTraining.summary));
       }
+      updatedCount += 1;
     }
 
-    const refreshedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
-    updateLastRefreshedDisplay(refreshedAt);
+    if (updatedCount > 0) {
+      const refreshedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
+      updateLastRefreshedDisplay(refreshedAt);
+      renderAll();
+      return { ok: true, updatedCount };
+    }
+
+    const firstError = results.find((result) => result && result.ok === false);
+    const message = firstError?.message || "서버 데이터를 불러오지 못했습니다. 기존 화면 데이터는 유지합니다.";
+    showToast(message);
+    renderAll();
+    updateLastRefreshedDisplay();
+    return { ok: false, message };
   } finally {
     if (!silent) setAdminLoading(false);
   }
 }
 
 async function syncApplicationStatusToServer(applicationId, status, reviewMemo) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/seller-applications/${encodeURIComponent(applicationId)}`, {
+  const result = await apiJson(`/api/seller-applications/${encodeURIComponent(applicationId)}`, {
     method: "PATCH",
     body: JSON.stringify({ status, reviewMemo }),
   });
 
   if (!result?.ok) {
     showToast(result?.message || "판매자 신청 상태 변경에 실패했습니다.");
-    return;
+    return null;
   }
-  await loadAdminDataFromServer();
-  renderAll();
+  return result;
 }
 
 async function syncMessageStatusToServer(messageId, payload) {
-  await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+  if (!result?.ok) {
+    showToast(result?.message || "알림톡 상태 저장에 실패했습니다.");
+    return false;
+  }
+  if (result.row) updateMessage(messageId, (message) => Object.assign(message, result.row));
+  return true;
 }
 
 async function resendMessage(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/resend`, {
     method: "POST",
   });
   if (result?.row) {
     updateMessage(messageId, (message) => Object.assign(message, result.row));
-  } else {
-    await loadAdminDataFromServer();
-    renderAll();
+  } else if (!result?.ok) {
+    showToast(result?.message || "알림톡 재발송에 실패했습니다.");
+    return;
   }
-  showToast(result?.message || (result?.ok ? "알림톡을 재발송했습니다." : "알림톡 재발송에 실패했습니다."));
+  showToast(result?.message || "알림톡을 재발송했습니다.");
 }
 
 async function refreshMessageStatus(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
     method: "POST",
   });
   if (result?.row) {
     updateMessage(messageId, (message) => Object.assign(message, result.row));
-  } else {
-    await loadAdminDataFromServer();
-    renderAll();
+  } else if (!result?.ok) {
+    showToast(result?.message || "알림톡 상태 확인에 실패했습니다.");
+    return;
   }
-  showToast(result?.ok ? "알림톡 최종 상태를 확인했습니다." : result?.message || "알림톡 상태 확인에 실패했습니다.");
+  showToast("알림톡 최종 상태를 확인했습니다.");
 }
 
 async function deleteMessage(messageId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk/${encodeURIComponent(messageId)}`, {
+  const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}`, {
     method: "DELETE",
   });
   if (!result?.ok) return;
@@ -754,7 +837,7 @@ function setApprovedSellers(rows) {
 }
 
 async function syncApprovedSellerPasswordToServer(sellerId, password) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ password }),
   });
@@ -764,13 +847,17 @@ async function syncApprovedSellerPasswordToServer(sellerId, password) {
     return false;
   }
 
-  await loadAdminDataFromServer();
+  if (result.row) {
+    setApprovedSellers(getApprovedSellers().map((seller) =>
+      seller.id === sellerId ? { ...seller, ...result.row } : seller
+    ));
+  }
   renderAll();
   return true;
 }
 
 async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify({ managerPosition }),
   });
@@ -789,7 +876,7 @@ async function syncApprovedSellerPositionToServer(sellerId, managerPosition) {
 }
 
 async function syncApprovedSellerUpdateToServer(sellerId, payload) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -805,8 +892,27 @@ async function syncApprovedSellerUpdateToServer(sellerId, payload) {
   return true;
 }
 
+async function syncApprovedSellerQuoteAlimtalkOptOutToServer(sellerId, quoteAlimtalkOptOut) {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quoteAlimtalkOptOut: Boolean(quoteAlimtalkOptOut) }),
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "신규 견적 알림톡 수신 설정 변경에 실패했습니다.");
+    return false;
+  }
+
+  const sellers = getApprovedSellers().map((seller) =>
+    seller.id === sellerId ? { ...seller, ...result.row } : seller
+  );
+  setApprovedSellers(sellers);
+  renderAll();
+  return true;
+}
+
 async function syncApprovedSellerDeleteToServer(sellerId) {
-  const result = await apiJson(`${PUBLIC_API_BASE}/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
+  const result = await apiJson(`/api/approved-sellers/${encodeURIComponent(sellerId)}`, {
     method: "DELETE",
   });
 
@@ -815,7 +921,13 @@ async function syncApprovedSellerDeleteToServer(sellerId) {
     return false;
   }
 
-  await loadAdminDataFromServer();
+  setApprovedSellers(getApprovedSellers().filter((seller) =>
+    String(seller.id) !== String(sellerId) && String(seller.sellerId || "") !== String(result.sellerId || "")
+  ));
+  setApplications(getApplications().filter((application) =>
+    String(application.id) !== String(sellerId) && String(application.sellerId || "") !== String(result.sellerId || "")
+  ));
+  if (selectedApplicationId === sellerId) selectedApplicationId = "";
   renderAll();
   return true;
 }
@@ -902,18 +1014,66 @@ async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
 }
 
 async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
-  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}`, {
+  const encodedId = encodeURIComponent(quoteId);
+  const request = {
     method: "DELETE",
     body: JSON.stringify({ reason }),
-  });
+  };
+
+  const result = await apiJson(`/api/customer-quotes/${encodedId}`, request);
 
   if (!result?.ok) {
     showToast(result?.message || "고객 견적 삭제에 실패했습니다.");
     return false;
   }
 
-  await loadAdminDataFromServer();
+  writeStorageArray(
+    STORAGE_KEYS.customerQuotes,
+    getCustomerQuotes().filter((quote) => String(quote.id) !== String(quoteId))
+  );
+
+  const deletedLogs = await apiJson(`/api/deleted-quote-logs?ts=${Date.now()}`, { silent: true });
+  if (deletedLogs?.ok && Array.isArray(deletedLogs.rows)) {
+    writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedLogs.rows);
+  }
   renderAll();
+  return true;
+}
+
+
+async function deleteManagerBidFromServer(bidId, quoteId, label = "판매자 제안") {
+  const confirmed = window.confirm(`${label}을(를) 서버에서 삭제하시겠습니까?\n삭제한 제안은 복구할 수 없습니다.`);
+  if (!confirmed) return false;
+
+  const result = await apiJson(`/api/bids/${encodeURIComponent(bidId)}`, {
+    method: "DELETE",
+  });
+
+  if (!result?.ok) {
+    showToast(result?.message || "판매자 제안 삭제에 실패했습니다.");
+    return false;
+  }
+
+  const targetQuoteId = String(quoteId || result.quoteId || "");
+  const updatedQuotes = getCustomerQuotes().map((quote) => {
+    if (String(quote.id || "") !== targetQuoteId) return quote;
+    if (result.row) return { ...quote, ...result.row };
+
+    const nextBids = (Array.isArray(quote.bids) ? quote.bids : [])
+      .filter((bid) => String(bid.id || "") !== String(bidId));
+    return {
+      ...quote,
+      bids: nextBids,
+      bidCount: nextBids.length,
+      selectedBidId: String(quote.selectedBidId || "") === String(bidId) ? null : quote.selectedBidId,
+      contactReleasedBidIds: (Array.isArray(quote.contactReleasedBidIds) ? quote.contactReleasedBidIds : [])
+        .filter((id) => String(id || "") !== String(bidId)),
+    };
+  });
+
+  writeStorageArray(STORAGE_KEYS.customerQuotes, updatedQuotes);
+  renderAll();
+  showToast("판매자 제안을 서버에서 삭제했습니다.");
   return true;
 }
 
@@ -1085,7 +1245,7 @@ function showToast(message) {
 }
 
 async function queueAlimtalk(message) {
-  const serverResult = await apiJson(`${PUBLIC_API_BASE}/api/alimtalk`, {
+  const serverResult = await apiJson(`/api/alimtalk`, {
     method: "POST",
     body: JSON.stringify(message),
   });
@@ -1343,46 +1503,50 @@ function renderApplicationDetail(application) {
   `;
 }
 
-function approveApplication(applicationId) {
+async function approveApplication(applicationId) {
   const applications = getApplications();
   const application = applications.find((row) => row.id === applicationId);
   if (!application || application.status !== "pending") return;
 
   const memo = document.querySelector("#reviewMemo")?.value.trim() || "승인되었습니다.";
-  const approvedSellers = getApprovedSellers();
-  const exists = approvedSellers.some((seller) => seller.sellerId === application.sellerId);
-  const reviewedAt = new Date().toISOString();
+  const result = await syncApplicationStatusToServer(application.id, "approved", memo);
+  if (!result?.ok) return;
 
-  if (!exists) {
-    const { password, ...safeApplication } = application;
-    approvedSellers.unshift({
-      ...safeApplication,
-      status: "approved",
-      reviewedAt,
-      reviewMemo: memo,
-      approvedAt: reviewedAt,
-    });
-    setApprovedSellers(approvedSellers);
+  const updatedApplication = result.row || {
+    ...application,
+    status: "approved",
+    reviewedAt: new Date().toISOString(),
+    reviewMemo: memo,
+  };
+  setApplications(applications.map((row) => row.id === applicationId ? { ...row, ...updatedApplication } : row));
+  if (result.approvedSeller) {
+    const current = getApprovedSellers().filter((row) =>
+      row.id !== result.approvedSeller.id && row.sellerId !== result.approvedSeller.sellerId
+    );
+    setApprovedSellers([result.approvedSeller, ...current]);
   }
-
-  Object.assign(application, { status: "approved", reviewedAt, reviewMemo: memo });
-  setApplications(applications);
-  showToast("판매자 신청을 승인했습니다.");
+  showToast("판매자 신청을 승인하고 서버에 저장했습니다.");
   renderAll();
-  syncApplicationStatusToServer(application.id, "approved", memo);
 }
 
-function rejectApplication(applicationId) {
+async function rejectApplication(applicationId) {
   const applications = getApplications();
   const application = applications.find((row) => row.id === applicationId);
   if (!application || application.status !== "pending") return;
 
   const memo = document.querySelector("#reviewMemo")?.value.trim() || "등록 정보 확인이 필요합니다.";
-  Object.assign(application, { status: "rejected", reviewedAt: new Date().toISOString(), reviewMemo: memo });
-  setApplications(applications);
-  showToast("판매자 신청을 반려했습니다. 반려 알림은 필요 시 수동 발송하세요.");
+  const result = await syncApplicationStatusToServer(application.id, "rejected", memo);
+  if (!result?.ok) return;
+
+  const updatedApplication = result.row || {
+    ...application,
+    status: "rejected",
+    reviewedAt: new Date().toISOString(),
+    reviewMemo: memo,
+  };
+  setApplications(applications.map((row) => row.id === applicationId ? { ...row, ...updatedApplication } : row));
+  showToast("판매자 신청을 반려하고 서버에 저장했습니다. 반려 알림은 필요 시 수동 발송하세요.");
   renderAll();
-  syncApplicationStatusToServer(application.id, "rejected", memo);
 }
 
 async function queueManualApplicationTalk(applicationId) {
@@ -1417,12 +1581,6 @@ async function queueManualApplicationTalk(applicationId) {
 
 function renderApprovedSellers() {
   const approved = getApprovedSellers();
-  const headerRow = approvedSellerRows.closest("table")?.querySelector("thead tr");
-  if (headerRow && headerRow.children.length < 5) {
-    const manageHeader = document.createElement("th");
-    manageHeader.textContent = "관리";
-    headerRow.appendChild(manageHeader);
-  }
 
   approvedSellerRows.innerHTML = approved.length
     ? approved.map((seller) => `
@@ -1432,6 +1590,16 @@ function renderApprovedSellers() {
         <td>${escapeHTML(seller.branchRegion || "지역 미등록")}</td>
         <td>${escapeHTML(seller.sellerId || "-")}</td>
         <td>
+          <label class="alimtalk-optout-control" title="체크하면 신규 고객 견적 알림톡이 발송되지 않습니다.">
+            <input
+              type="checkbox"
+              data-quote-alimtalk-optout="${escapeHTML(seller.id)}"
+              ${seller.quoteAlimtalkOptOut ? "checked" : ""}
+            />
+            <span>${seller.quoteAlimtalkOptOut ? "수신거부" : "수신중"}</span>
+          </label>
+        </td>
+        <td>
           <div class="table-actions">
             <button class="plain-btn small-btn" type="button" data-edit-approved-seller="${escapeHTML(seller.id)}">정보 수정</button>
             <button class="plain-btn small-btn" type="button" data-reset-approved-password="${escapeHTML(seller.id)}">비밀번호 초기화</button>
@@ -1440,7 +1608,7 @@ function renderApprovedSellers() {
         </td>
       </tr>
     `).join("")
-    : `<tr><td colspan="5">아직 승인된 판매자가 없습니다.</td></tr>`;
+    : `<tr><td colspan="6">아직 승인된 판매자가 없습니다.</td></tr>`;
 }
 
 const ADMIN_QUOTE_RECEIVE_HOURS = 72;
@@ -1513,11 +1681,26 @@ function quoteStatusMeta(quote) {
   return { label: "견적제안 중", className: "quote-bidding", note: "판매자가 제안할 수 있는 상태입니다." };
 }
 
+function getAdminQuoteSelectionMeta(quote) {
+  if (!quote?.selectedBidId) return null;
+  const releasedIds = Array.isArray(quote.contactReleasedBidIds)
+    ? quote.contactReleasedBidIds.map((id) => String(id || "")).filter(Boolean)
+    : [];
+  const top3 = quote.contactReleaseScope === "top3" || releasedIds.length > 1;
+  return {
+    top3,
+    label: top3 ? "1~3순위" : "1순위만",
+    detail: top3 ? "1~3순위까지 연락처 공개" : "1순위에게만 연락처 공개",
+    releasedIds,
+  };
+}
+
 function renderQuoteBidSummary(quote) {
   const bids = Array.isArray(quote.bids) ? quote.bids : [];
   const sortedBids = [...bids].sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
   const lowestBid = sortedBids[0];
   const selectedBid = sortedBids.find((bid) => bid.id === quote.selectedBidId);
+  const selectionMeta = getAdminQuoteSelectionMeta(quote);
   const summaryText = sortedBids.length
     ? `제안 ${sortedBids.length}건 · 최저 ${formatWon(lowestBid?.price)}`
     : "제안 0건";
@@ -1526,6 +1709,7 @@ function renderQuoteBidSummary(quote) {
     <details class="quote-bid-summary">
       <summary>
         <span>${escapeHTML(summaryText)}</span>
+        ${selectionMeta ? `<span class="quote-selection-summary ${selectionMeta.top3 ? "is-top3" : "is-single"}">${escapeHTML(selectionMeta.detail)}</span>` : ""}
         ${selectedBid ? `<strong>선택 매니저 ${escapeHTML(selectedBid.manager || selectedBid.seller || "-")}</strong>` : ""}
       </summary>
       ${
@@ -1534,6 +1718,7 @@ function renderQuoteBidSummary(quote) {
               ${sortedBids
                 .map((bid, index) => {
                   const isSelected = bid.id === quote.selectedBidId;
+                  const isContactReleased = Boolean(selectionMeta?.releasedIds?.includes(String(bid.id || "")));
                   const managerLabel = [bid.manager, bid.managerPosition].filter(Boolean).join(" ");
                   const branchLabel = [bid.channel, bid.branch].filter(Boolean).join(" ");
                   return `
@@ -1547,7 +1732,13 @@ function renderQuoteBidSummary(quote) {
                         <small>${escapeHTML(formatPhoneNumber(bid.phone) || "연락처 미입력")}</small>
                       </div>
                       <p>${escapeHTML(bid.benefits || "제공 조건 미입력")}</p>
-                      ${isSelected ? `<em>고객님 선택</em>` : ""}
+                      <div class="quote-bid-row-actions">
+                        ${isSelected ? `<em>고객님 직접 선택</em>` : isContactReleased ? `<em class="contact-released">연락처 공개 대상</em>` : ""}
+                        <button class="danger-btn small-btn" type="button"
+                          data-delete-manager-bid="${escapeHTML(String(bid.id || ""))}"
+                          data-delete-manager-bid-quote="${escapeHTML(String(quote.id || ""))}"
+                          data-delete-manager-bid-label="${escapeHTML(managerLabel || branchLabel || "판매자 제안")}">제안 삭제</button>
+                      </div>
                     </article>
                   `;
                 })
@@ -1559,9 +1750,48 @@ function renderQuoteBidSummary(quote) {
   `;
 }
 
+function normalizeCustomerQuoteSearchValue(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("ko-KR")
+    .replace(/[\s-]+/g, "");
+}
+
+function customerQuoteMatchesSearch(quote, searchTerm) {
+  const normalizedSearch = normalizeCustomerQuoteSearchValue(searchTerm);
+  if (!normalizedSearch) return true;
+
+  const textCandidates = [
+    quote.quoteNumber,
+    quote.customer,
+    quote.phone,
+    quote.id,
+  ].map(normalizeCustomerQuoteSearchValue);
+
+  if (textCandidates.some((candidate) => candidate.includes(normalizedSearch))) return true;
+
+  const phoneDigits = String(searchTerm || "").replace(/\D/g, "");
+  return Boolean(phoneDigits) && normalizePhone(quote.phone).includes(phoneDigits);
+}
+
 function renderCustomerQuotes() {
   if (!customerQuoteList) return;
-  const quotes = getCustomerQuotes();
+  const allQuotes = getCustomerQuotes();
+  const searchTerm = customerQuoteSearchTerm.trim();
+  const quotes = searchTerm
+    ? allQuotes.filter((quote) => customerQuoteMatchesSearch(quote, searchTerm))
+    : allQuotes;
+
+  if (customerQuoteSearch && customerQuoteSearch.value !== customerQuoteSearchTerm) {
+    customerQuoteSearch.value = customerQuoteSearchTerm;
+  }
+  if (customerQuoteSearchClear) customerQuoteSearchClear.hidden = !searchTerm;
+  if (customerQuoteSearchSummary) {
+    customerQuoteSearchSummary.textContent = searchTerm
+      ? `검색 결과 ${quotes.length}건 · 전체 ${allQuotes.length}건`
+      : `전체 ${allQuotes.length}건`;
+  }
+
   customerQuoteList.innerHTML = quotes.length
     ? quotes.map((quote) => {
       const status = quoteStatusMeta(quote);
@@ -1592,6 +1822,7 @@ function renderCustomerQuotes() {
               <span>등록 ${escapeHTML(formatDate(quote.createdAt))}</span>
               <span>전체 이미지 ${imagesCount}장 · 7일 보관</span>
               <span>제안 ${escapeHTML(String(quote.bidCount || quote.bidsCount || 0))}건</span>
+              ${getAdminQuoteSelectionMeta(quote) ? `<span class="quote-selection-chip ${getAdminQuoteSelectionMeta(quote).top3 ? "is-top3" : "is-single"}">고객 선택 범위 · ${escapeHTML(getAdminQuoteSelectionMeta(quote).label)}</span>` : ""}
               <span data-admin-quote-countdown data-quote-id="${escapeHTML(quote.id)}">남은 시간 ${escapeHTML(getAdminQuoteRemainingLabel(quote))}</span>
             </div>
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
@@ -1605,12 +1836,19 @@ function renderCustomerQuotes() {
         </article>
       `;
     }).join("")
-    : `
-      <div class="empty-state">
-        <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
-        <p>${escapeHTML(customerQuoteSyncError || "노출용에서 고객 견적이 등록되면 이곳에 저장 현황과 알림톡 상태가 표시됩니다.")}</p>
-      </div>
-    `;
+    : searchTerm && allQuotes.length
+      ? `
+        <div class="empty-state">
+          <strong>검색 결과가 없습니다.</strong>
+          <p>견적번호, 고객명 또는 휴대전화번호를 다시 확인해주세요.</p>
+        </div>
+      `
+      : `
+        <div class="empty-state">
+          <strong>아직 서버에 저장된 고객 견적이 없습니다.</strong>
+          <p>${escapeHTML(customerQuoteSyncError || "노출용에서 고객 견적이 등록되면 이곳에 저장 현황과 알림톡 상태가 표시됩니다.")}</p>
+        </div>
+      `;
   renderDeletedQuoteLogs();
 }
 
@@ -1791,7 +2029,6 @@ async function resetApprovedSellerPassword(sellerId) {
     return;
   }
   const ok = await syncApprovedSellerPasswordToServer(sellerId, String(nextPassword).trim());
-  if (ok) await loadAdminDataFromServer();
   showToast(ok ? "비밀번호가 초기화되었습니다." : "비밀번호 초기화에 실패했습니다.");
   renderAll();
 }
@@ -1801,11 +2038,6 @@ async function saveApprovedSellerPosition(sellerId) {
   const seller = getApprovedSellers().find((row) => row.id === sellerId);
   if (!input || !seller) return;
   const managerPosition = input.value.trim();
-  const rows = getApprovedSellers();
-  const target = rows.find((row) => row.id === sellerId);
-  if (target) target.managerPosition = managerPosition;
-  setApprovedSellers(rows);
-  renderAll();
   const ok = await syncApprovedSellerPositionToServer(sellerId, managerPosition);
   showToast(ok ? "판매자 직책을 변경했습니다." : "판매자 직책 변경에 실패했습니다.");
 }
@@ -1815,8 +2047,6 @@ async function deleteApprovedSeller(sellerId) {
   if (!seller) return;
   const confirmed = window.confirm(`${sellerName(seller) || seller.sellerId} 판매자를 삭제할까요?\n삭제하면 해당 아이디로 판매자 로그인을 할 수 없습니다.`);
   if (!confirmed) return;
-  setApprovedSellers(getApprovedSellers().filter((row) => row.id !== sellerId));
-  renderAll();
   const ok = await syncApprovedSellerDeleteToServer(sellerId);
   showToast(ok ? "승인 판매자를 삭제했습니다." : "승인 판매자 삭제에 실패했습니다.");
 }
@@ -1839,8 +2069,6 @@ async function deleteCustomerQuote(quoteId) {
     showToast("삭제 사유를 입력해야 견적을 삭제할 수 있습니다.");
     return;
   }
-  writeStorageArray(STORAGE_KEYS.customerQuotes, getCustomerQuotes().filter((row) => row.id !== quoteId));
-  renderAll();
   const ok = await syncCustomerQuoteDeleteToServer(quoteId, trimmedReason);
   showToast(ok ? "고객 견적을 삭제하고 사유를 기록했습니다." : "고객 견적 삭제에 실패했습니다.");
 }
@@ -1934,12 +2162,259 @@ function openStatAction(action) {
   }
 }
 
+
+function getBrandPackagesAdmin() { return readStorageArray(STORAGE_KEYS.brandPackages); }
+function setBrandPackagesAdmin(rows) { writeStorageArray(STORAGE_KEYS.brandPackages, Array.isArray(rows) ? rows : []); }
+function getBrandConsultationsAdmin() { return readStorageArray(STORAGE_KEYS.brandConsultations); }
+function setBrandConsultationsAdmin(rows) { writeStorageArray(STORAGE_KEYS.brandConsultations, Array.isArray(rows) ? rows : []); }
+
+function brandMoney(value) { return `${new Intl.NumberFormat('ko-KR').format(Number(value || 0))}원`; }
+function brandDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ko-KR', { year:'2-digit', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function escapeBrandHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+}
+function publicBrandChannel(value) {
+  const compact = String(value || '').replace(/\s+/g, '').toLowerCase();
+  if (compact.includes('전자랜드')) return '전자랜드';
+  if (compact.includes('하이마트')) return '하이마트';
+  if (compact.includes('삼성스토어') || compact.includes('samsungstore')) return '삼성스토어';
+  if (compact.includes('lg전자bestshop') || compact.includes('lgbestshop') || compact.includes('lg베스트샵') || compact.includes('베스트샵')) return 'LG전자 BEST SHOP';
+  return '';
+}
+function eligibleBrandSellers() { return getApprovedSellers().filter((seller) => publicBrandChannel(seller.channel)); }
+
+function renderBrandSellerOptions(selected = '') {
+  if (!brandPackageSeller) return;
+  const sellers = eligibleBrandSellers();
+  const current = selected || brandPackageSeller.value;
+  brandPackageSeller.innerHTML = `<option value="">승인 판매자를 선택하세요</option>` + sellers.map((seller) =>
+    `<option value="${escapeBrandHtml(seller.sellerId)}">${escapeBrandHtml(publicBrandChannel(seller.channel))} · ${escapeBrandHtml(seller.branch || '')} · ${escapeBrandHtml(seller.manager || '')}</option>`
+  ).join('');
+  if (current && sellers.some((seller) => String(seller.sellerId) === String(current))) brandPackageSeller.value = current;
+  renderBrandSelectedSeller();
+}
+
+function renderBrandSelectedSeller() {
+  if (!brandSelectedSeller || !brandPackageSeller) return;
+  const seller = eligibleBrandSellers().find((row) => String(row.sellerId) === String(brandPackageSeller.value));
+  if (!seller) {
+    brandSelectedSeller.textContent = '판매자를 선택하면 내부 지점·매니저 정보가 표시됩니다.';
+    return;
+  }
+  brandSelectedSeller.innerHTML = `<strong>고객 공개: ${escapeBrandHtml(publicBrandChannel(seller.channel))}</strong><br>내부 지점: ${escapeBrandHtml(seller.branch || '-')} · 담당지역: ${escapeBrandHtml(seller.branchRegion || '-')}<br>매니저: ${escapeBrandHtml(seller.manager || '-')} ${escapeBrandHtml(seller.managerPosition || '')} · ${escapeBrandHtml(formatPhoneNumber(seller.phone || ''))}`;
+}
+
+function parseBrandManwon(value) {
+  const raw = String(value ?? '').replace(/[,\s]/g, '').replace(/만원|원/g, '').trim();
+  if (!raw) return 0;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) return NaN;
+  return Math.round(amount * 10000);
+}
+
+function formatBrandManwonFromWon(value) {
+  const won = Number(value || 0);
+  if (!Number.isFinite(won) || won <= 0) return '';
+  const manwon = won / 10000;
+  return manwon.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+}
+
+function updateBrandPricePreview(input) {
+  if (!input || !brandPackageAdminForm) return;
+  const preview = brandPackageAdminForm.querySelector(`[data-brand-price-preview="${input.name}"]`);
+  if (!preview) return;
+  const won = parseBrandManwon(input.value);
+  if (!String(input.value || '').trim()) {
+    preview.textContent = input.name === 'salePrice' ? '필수 · 실제 판매 금액을 입력하세요.' : '금액을 입력하면 원 단위로 표시됩니다.';
+    preview.classList.remove('has-value');
+    return;
+  }
+  if (!Number.isFinite(won)) {
+    preview.textContent = '숫자로 입력해주세요. 예: 2,389';
+    preview.classList.remove('has-value');
+    return;
+  }
+  preview.textContent = `= ${brandMoney(won)}`;
+  preview.classList.add('has-value');
+}
+
+function formatBrandManwonInput(input) {
+  if (!input) return;
+  const raw = String(input.value || '').replace(/[,\s]/g, '').trim();
+  if (!raw) return;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) return;
+  input.value = amount.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
+  updateBrandPricePreview(input);
+}
+
+function clearBrandPackageFieldErrors() {
+  if (!brandPackageAdminForm) return;
+  brandPackageAdminForm.querySelectorAll('label.brand-field-error').forEach((label) => label.classList.remove('brand-field-error'));
+}
+
+function markBrandPackageFieldError(field) {
+  const label = field?.closest?.('label');
+  if (label) label.classList.add('brand-field-error');
+}
+
+function resetBrandPackageForm() {
+  if (!brandPackageAdminForm) return;
+  brandPackageAdminForm.reset();
+  brandPackageAdminForm.elements.packageId.value = '';
+  brandCoverDataUrl = '';
+  if (brandCoverPreview) brandCoverPreview.textContent = '대표 이미지 미리보기';
+  if (brandPackageFormTitle) brandPackageFormTitle.textContent = '패키지 등록';
+  clearBrandPackageFieldErrors();
+  updateBrandPricePreview(brandPackageAdminForm.elements.originalPrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.salePrice);
+  renderBrandSellerOptions('');
+}
+
+function editBrandPackage(id) {
+  const row = getBrandPackagesAdmin().find((item) => String(item.id) === String(id));
+  if (!row || !brandPackageAdminForm) return;
+  brandPackageAdminForm.elements.packageId.value = row.id || '';
+  renderBrandSellerOptions(row.sellerId || '');
+  brandPackageAdminForm.elements.brand.value = row.brand || '';
+  brandPackageAdminForm.elements.status.value = row.status || 'active';
+  brandPackageAdminForm.elements.title.value = row.title || '';
+  brandPackageAdminForm.elements.items.value = Array.isArray(row.items) ? row.items.join('\n') : '';
+  brandPackageAdminForm.elements.originalPrice.value = formatBrandManwonFromWon(row.originalPrice);
+  brandPackageAdminForm.elements.salePrice.value = formatBrandManwonFromWon(row.salePrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.originalPrice);
+  updateBrandPricePreview(brandPackageAdminForm.elements.salePrice);
+  brandPackageAdminForm.elements.benefits.value = row.benefits || '';
+  brandCoverDataUrl = '';
+  if (brandCoverPreview) brandCoverPreview.innerHTML = row.coverImage ? `<img src="${escapeBrandHtml(row.coverImage)}" alt="대표 이미지" />` : '대표 이미지 미리보기';
+  if (brandPackageFormTitle) brandPackageFormTitle.textContent = '패키지 수정';
+  brandPackageAdminForm.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+async function saveBrandPackageAdmin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const packageId = String(form.elements.packageId.value || '').trim();
+  clearBrandPackageFieldErrors();
+  const originalPrice = parseBrandManwon(form.elements.originalPrice.value);
+  const salePrice = parseBrandManwon(form.elements.salePrice.value);
+  const items = form.elements.items.value.split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
+  const requiredChecks = [
+    [form.elements.sellerId, Boolean(form.elements.sellerId.value), '연결 판매자'],
+    [form.elements.brand, Boolean(form.elements.brand.value), '브랜드'],
+    [form.elements.title, Boolean(form.elements.title.value.trim()), '패키지명'],
+    [form.elements.items, Boolean(items.length), '제품 구성'],
+    [form.elements.salePrice, Number.isFinite(salePrice) && salePrice > 0, '판매가'],
+  ];
+  const missing = requiredChecks.filter(([, valid]) => !valid);
+  if (missing.length) {
+    missing.forEach(([field]) => markBrandPackageFieldError(field));
+    missing[0]?.[0]?.focus?.();
+    showToast(`필수 항목을 확인해주세요: ${missing.map(([, , name]) => name).join(', ')}`);
+    return;
+  }
+  if (!Number.isFinite(originalPrice)) {
+    markBrandPackageFieldError(form.elements.originalPrice);
+    form.elements.originalPrice.focus();
+    showToast('정상가는 숫자로 입력해주세요. 금액 입력 단위는 만원입니다.');
+    return;
+  }
+  const payload = {
+    sellerId: form.elements.sellerId.value,
+    brand: form.elements.brand.value,
+    status: form.elements.status.value,
+    title: form.elements.title.value.trim(),
+    items,
+    originalPrice,
+    salePrice,
+    benefits: form.elements.benefits.value.trim(),
+    coverImageDataUrl: brandCoverDataUrl,
+  };
+  setAdminLoading(true, '브랜드관 패키지를 서버에 저장하는 중입니다.', '이미지와 판매처 정보를 함께 반영하고 있습니다.');
+  try {
+    const result = await apiJson(packageId ? `/api/brand-hall/packages/${encodeURIComponent(packageId)}` : '/api/brand-hall/packages', {
+      method: packageId ? 'PATCH' : 'POST', body: JSON.stringify({ package: payload }), silent: true,
+    });
+    if (!result?.ok || !result.row) { showToast(result?.message || '브랜드관 패키지 저장에 실패했습니다.'); return; }
+    const rows = getBrandPackagesAdmin();
+    const index = rows.findIndex((row) => String(row.id) === String(result.row.id));
+    if (index >= 0) rows[index] = result.row; else rows.unshift(result.row);
+    setBrandPackagesAdmin(rows);
+    resetBrandPackageForm();
+    renderBrandHallAdmin();
+    showToast('브랜드관 패키지를 서버에 저장했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+async function deleteBrandPackageAdmin(id) {
+  const row = getBrandPackagesAdmin().find((item) => String(item.id) === String(id));
+  if (!row) return;
+  if (!window.confirm(`${row.title || '패키지'}를 브랜드관 서버에서 삭제할까요?`)) return;
+  setAdminLoading(true, '브랜드관 패키지를 삭제하는 중입니다.', '서버 데이터와 대표 이미지를 함께 정리하고 있습니다.');
+  try {
+    const result = await apiJson(`/api/brand-hall/packages/${encodeURIComponent(id)}`, { method:'DELETE', silent:true });
+    if (!result?.ok) { showToast(result?.message || '패키지 삭제에 실패했습니다.'); return; }
+    setBrandPackagesAdmin(getBrandPackagesAdmin().filter((item) => String(item.id) !== String(id)));
+    if (brandPackageAdminForm?.elements.packageId.value === id) resetBrandPackageForm();
+    renderBrandHallAdmin();
+    showToast('브랜드관 패키지를 서버에서 삭제했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+async function saveBrandConsultationAdmin(id) {
+  const rowEl = document.querySelector(`[data-brand-consult-row="${CSS.escape(id)}"]`);
+  if (!rowEl) return;
+  const payload = {
+    status: rowEl.querySelector('[data-brand-consult-status]')?.value || 'new',
+    contractAmount: Number(rowEl.querySelector('[data-brand-contract-amount]')?.value || 0),
+    commissionAmount: Number(rowEl.querySelector('[data-brand-commission-amount]')?.value || 0),
+    settlementStatus: rowEl.querySelector('[data-brand-settlement-status]')?.value || 'unsettled',
+    adminMemo: rowEl.querySelector('[data-brand-admin-memo]')?.value || '',
+  };
+  setAdminLoading(true, '상담·정산 상태를 저장하는 중입니다.', '계약 진행 정보와 수수료 정산 상태를 서버에 반영하고 있습니다.');
+  try {
+    const result = await apiJson(`/api/brand-hall/consultations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(payload), silent:true });
+    if (!result?.ok || !result.row) { showToast(result?.message || '상담 상태 저장에 실패했습니다.'); return; }
+    const rows = getBrandConsultationsAdmin();
+    const index = rows.findIndex((row) => String(row.id) === String(id));
+    if (index >= 0) rows[index] = result.row;
+    setBrandConsultationsAdmin(rows);
+    renderBrandHallAdmin();
+    showToast('상담·계약·수수료 정보를 서버에 저장했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
+function renderBrandHallAdmin() {
+  if (!brandHallPanel) return;
+  renderBrandSellerOptions(brandPackageAdminForm?.elements.sellerId?.value || '');
+  const packages = getBrandPackagesAdmin();
+  if (brandPackageAdminCount) brandPackageAdminCount.textContent = `${packages.length}건`;
+  if (brandAdminPackageList) {
+    brandAdminPackageList.innerHTML = packages.length ? packages.map((row) => {
+      const thumb = row.coverImage ? `<img src="${escapeBrandHtml(row.coverImage)}" alt="" />` : escapeBrandHtml((row.brand || 'P').slice(0,1));
+      return `<article class="brand-admin-package-card"><div class="brand-admin-package-thumb">${thumb}</div><div class="brand-admin-package-copy"><strong>${escapeBrandHtml(row.title)}</strong><p>고객 공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')} · ${escapeBrandHtml(row.brand || '')}</p><p>내부: ${escapeBrandHtml(row.branch || '-')} · ${escapeBrandHtml(row.manager || '-')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</p><b>${brandMoney(row.salePrice)} · ${row.status === 'active' ? '공개' : '숨김'}</b></div><div class="brand-admin-package-actions"><button class="plain-btn" type="button" data-brand-package-edit="${escapeBrandHtml(row.id)}">수정</button><button class="danger-btn" type="button" data-brand-package-delete="${escapeBrandHtml(row.id)}">삭제</button></div></article>`;
+    }).join('') : '<div class="brand-admin-empty">등록된 브랜드관 패키지가 없습니다.</div>';
+  }
+
+  const consultations = getBrandConsultationsAdmin();
+  if (brandConsultAdminCount) brandConsultAdminCount.textContent = `${consultations.length}건`;
+  if (brandConsultAdminRows) {
+    brandConsultAdminRows.innerHTML = consultations.length ? consultations.map((row) => `<tr data-brand-consult-row="${escapeBrandHtml(row.id)}"><td><div class="brand-consult-meta"><strong>${brandDate(row.createdAt)}</strong>${escapeBrandHtml(row.deliveryStatus || '')}${row.deliveryError ? `<br><span title="${escapeBrandHtml(row.deliveryError)}">알림 오류</span>` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.customerName)}</strong><a href="tel:${escapeBrandHtml(row.customerPhone)}">${escapeBrandHtml(row.customerPhoneFormatted || formatPhoneNumber(row.customerPhone))}</a><br>${escapeBrandHtml(row.customerRegion || '')}<br>${escapeBrandHtml(row.preferredTime || '')}${row.memo ? `<br>문의: ${escapeBrandHtml(row.memo)}` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.packageTitle || '-')}</strong>공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')}<br>내부: ${escapeBrandHtml(row.channel || '')} ${escapeBrandHtml(row.branch || '')}<br>${escapeBrandHtml(row.manager || '')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</div></td><td><select data-brand-consult-status><option value="new" ${row.status==='new'?'selected':''}>신규</option><option value="contacted" ${row.status==='contacted'?'selected':''}>고객 연락</option><option value="negotiating" ${row.status==='negotiating'?'selected':''}>계약 진행</option><option value="contracted" ${row.status==='contracted'?'selected':''}>계약 완료</option><option value="cancelled" ${row.status==='cancelled'?'selected':''}>취소</option></select></td><td><input data-brand-contract-amount type="number" min="0" step="1000" value="${Number(row.contractAmount || 0)}" /></td><td><input data-brand-commission-amount type="number" min="0" step="1000" value="${Number(row.commissionAmount || 0)}" /></td><td><select data-brand-settlement-status><option value="unsettled" ${row.settlementStatus==='unsettled'?'selected':''}>미정산</option><option value="pending" ${row.settlementStatus==='pending'?'selected':''}>정산예정</option><option value="settled" ${row.settlementStatus==='settled'?'selected':''}>정산완료</option><option value="waived" ${row.settlementStatus==='waived'?'selected':''}>수수료없음</option></select>${row.settledAt ? `<div class="brand-consult-meta">${brandDate(row.settledAt)}</div>` : ''}</td><td><textarea data-brand-admin-memo maxlength="1200" placeholder="상담 내용, 계약 일정, 정산 메모">${escapeBrandHtml(row.adminMemo || '')}</textarea></td><td><button class="primary-btn brand-consult-save-btn" type="button" data-brand-consult-save="${escapeBrandHtml(row.id)}">저장</button></td></tr>`).join('') : '<tr><td colspan="9"><div class="brand-admin-empty">브랜드관 상담 신청이 없습니다.</div></td></tr>';
+  }
+}
+
 function renderAll() {
   renderStatsCards();
   renderLplanSyncPanel();
   renderCustomerQuotes();
   renderApplications();
   renderApprovedSellers();
+  renderBrandHallAdmin();
   renderSellerAccessLogs();
   renderMessages();
   applyAdminPageView();
@@ -1956,6 +2431,16 @@ function renderAll() {
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-admin-text-cancel]") || event.target === adminTextModal) {
     closeAdminTextModal(null);
+    return;
+  }
+
+  if (event.target.closest("#customerQuoteSearchClear")) {
+    customerQuoteSearchTerm = "";
+    if (customerQuoteSearch) {
+      customerQuoteSearch.value = "";
+      customerQuoteSearch.focus();
+    }
+    renderCustomerQuotes();
     return;
   }
 
@@ -2047,6 +2532,16 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const deleteManagerBidButton = event.target.closest("[data-delete-manager-bid]");
+  if (deleteManagerBidButton) {
+    deleteManagerBidFromServer(
+      deleteManagerBidButton.dataset.deleteManagerBid,
+      deleteManagerBidButton.dataset.deleteManagerBidQuote,
+      deleteManagerBidButton.dataset.deleteManagerBidLabel
+    );
+    return;
+  }
+
   const replaceCustomerQuoteImageButton = event.target.closest("[data-replace-customer-quote-image]");
   if (replaceCustomerQuoteImageButton) {
     replaceCustomerQuoteImage(replaceCustomerQuoteImageButton.dataset.replaceCustomerQuoteImage);
@@ -2078,11 +2573,34 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target === customerQuoteSearch) {
+    customerQuoteSearchTerm = event.target.value;
+    renderCustomerQuotes();
+    return;
+  }
   if (!event.target.matches("[data-phone-edit]")) return;
   event.target.value = formatPhoneNumber(event.target.value);
 });
 
 editCustomerQuoteForm?.addEventListener("submit", submitCustomerQuoteEdit);
+document.addEventListener("change", async (event) => {
+  const checkbox = event.target.closest?.("[data-quote-alimtalk-optout]");
+  if (!checkbox) return;
+
+  const sellerId = checkbox.dataset.quoteAlimtalkOptout;
+  const nextOptOut = Boolean(checkbox.checked);
+  checkbox.disabled = true;
+  const ok = await syncApprovedSellerQuoteAlimtalkOptOutToServer(sellerId, nextOptOut);
+  if (!ok) {
+    checkbox.checked = !nextOptOut;
+    checkbox.disabled = false;
+    return;
+  }
+  showToast(nextOptOut
+    ? "이 판매자는 신규 견적 알림톡 수신거부로 설정했습니다."
+    : "이 판매자의 신규 견적 알림톡 수신을 다시 허용했습니다.");
+});
+
 editApprovedSellerForm?.addEventListener("submit", submitApprovedSellerEdit);
 adminTextModalForm?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2107,6 +2625,38 @@ document.addEventListener("keydown", (event) => {
 
   event.preventDefault();
   openStatAction(statAction.dataset.statAction);
+});
+
+brandPackageSeller?.addEventListener('change', renderBrandSelectedSeller);
+brandPackageAdminForm?.elements.originalPrice?.addEventListener('input', (event) => { event.currentTarget.closest('label')?.classList.remove('brand-field-error'); updateBrandPricePreview(event.currentTarget); });
+brandPackageAdminForm?.elements.salePrice?.addEventListener('input', (event) => { event.currentTarget.closest('label')?.classList.remove('brand-field-error'); updateBrandPricePreview(event.currentTarget); });
+brandPackageAdminForm?.elements.originalPrice?.addEventListener('blur', (event) => formatBrandManwonInput(event.currentTarget));
+brandPackageAdminForm?.elements.salePrice?.addEventListener('blur', (event) => formatBrandManwonInput(event.currentTarget));
+brandPackageAdminForm?.querySelectorAll('[required]').forEach((field) => {
+  const clear = () => field.closest('label')?.classList.remove('brand-field-error');
+  field.addEventListener('input', clear);
+  field.addEventListener('change', clear);
+});
+
+document.querySelector('#brandPackageResetBtn')?.addEventListener('click', resetBrandPackageForm);
+brandCoverImageInput?.addEventListener('change', () => {
+  const file = brandCoverImageInput.files?.[0];
+  if (!file) { brandCoverDataUrl = ''; return; }
+  if (file.size > 8 * 1024 * 1024) { showToast('대표 이미지는 8MB 이하로 등록해주세요.'); brandCoverImageInput.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = () => { brandCoverDataUrl = String(reader.result || ''); if (brandCoverPreview) brandCoverPreview.innerHTML = `<img src="${escapeBrandHtml(brandCoverDataUrl)}" alt="대표 이미지 미리보기" />`; };
+  reader.onerror = () => showToast('대표 이미지를 읽지 못했습니다.');
+  reader.readAsDataURL(file);
+});
+brandPackageAdminForm?.addEventListener('submit', saveBrandPackageAdmin);
+
+document.addEventListener('click', (event) => {
+  const edit = event.target.closest('[data-brand-package-edit]');
+  if (edit) { editBrandPackage(edit.dataset.brandPackageEdit); return; }
+  const del = event.target.closest('[data-brand-package-delete]');
+  if (del) { deleteBrandPackageAdmin(del.dataset.brandPackageDelete); return; }
+  const consultSave = event.target.closest('[data-brand-consult-save]');
+  if (consultSave) { saveBrandConsultationAdmin(consultSave.dataset.brandConsultSave); return; }
 });
 
 document.addEventListener("click", (event) => {
@@ -2147,13 +2697,24 @@ sellerAccessDays?.addEventListener("change", async () => {
   }
 });
 
+adminAuthBtn?.addEventListener("click", async () => {
+  const token = await requestAdminApiToken(true);
+  if (!token) return;
+  const status = await apiJson("/api/auth-status", { silent: true });
+  showToast(status?.ok
+    ? `관리자 인증이 완료되었습니다. (${status.tokenSource || "Cloudflare Secret"})`
+    : status?.message || "관리자 인증에 실패했습니다.");
+  if (status?.ok) {
+    showToast("인증이 완료되었습니다. 서버 데이터는 새로고침 버튼을 눌러 불러오세요.");
+  }
+});
+
 refreshBtn.addEventListener("click", async () => {
   refreshBtn.disabled = true;
   refreshBtn.textContent = "갱신 중";
   try {
-    await loadAdminDataFromServer();
-    renderAll();
-    showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
+    const result = await loadAdminDataFromServer();
+    if (result?.ok) showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
   } finally {
     refreshBtn.disabled = false;
     refreshBtn.textContent = "새로고침";
@@ -2162,8 +2723,9 @@ refreshBtn.addEventListener("click", async () => {
 
 
 window.addEventListener("storage", (event) => {
-  if (!Object.values(STORAGE_KEYS).includes(event.key)) return;
-  renderAll();
+  // 다른 탭의 과거 목록 데이터는 현재 화면과 합치지 않습니다.
+  // 관리자 토큰이 변경된 경우에만 인증 상태를 다음 요청에서 다시 사용합니다.
+  if (event.key !== STORAGE_KEYS.adminApiToken) return;
 });
 
 const initialApplicationIdFromUrl = new URLSearchParams(window.location.search).get("applicationId") || "";
@@ -2174,7 +2736,7 @@ if (initialApplicationIdFromUrl) {
 
 updateLastRefreshedDisplay();
 renderAll();
-loadAdminDataFromServer().finally(renderAll);
+showToast("서버 데이터는 상단 새로고침 버튼을 눌렀을 때만 불러옵니다.");
 
 
 

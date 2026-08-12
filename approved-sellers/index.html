@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>픽견적 관리자</title>
     <meta name="description" content="픽견적 판매자 신청, 고객 견적, 알림톡 발송 상태를 관리하는 운영 페이지입니다." />
-    <link rel="stylesheet" href="/admin.css?v=20260804-seller-access" />
-    <script defer src="/admin.js?v=20260804-seller-access" charset="utf-8"></script>
+    <link rel="stylesheet" href="/admin.css?v=20260812-approved-sellers-layout-v1" />
+    <script defer src="/admin.js?v=20260812-approved-sellers-layout-v1" charset="utf-8"></script>
   </head>
   <body>
     <aside class="sidebar">
@@ -23,6 +23,7 @@
         <a href="/customers" data-admin-nav="customers">고객 견적</a>
         <a href="/sellers" data-admin-nav="sellers">판매자 신청</a>
         <a href="/approved-sellers" data-admin-nav="approvedSellers">승인 판매자</a>
+        <a href="/brand-hall" data-admin-nav="brandHall">브랜드관 관리</a>
         <a href="/seller-access" data-admin-nav="sellerAccess">판매자 접속 기록</a>
         <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
       </nav>
@@ -38,6 +39,7 @@
         </div>
         <div class="admin-actions">
           <a class="ghost-btn" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면</a>
+          <button class="ghost-btn" id="adminAuthBtn" type="button">관리자 인증</button>
           <button class="primary-btn" id="refreshBtn" type="button">새로고침</button>
         </div>
       </header>
@@ -68,13 +70,18 @@
             <strong>승인 판매자</strong>
             <p>판매자 계정, 지점, 매니저 정보를 관리합니다.</p>
           </a>
-          <a class="dashboard-link-card" href="/seller-access">
+          <a class="dashboard-link-card" href="/brand-hall" data-admin-nav="brandHall">
             <span>04</span>
+            <strong>브랜드관 관리</strong>
+            <p>패키지를 직접 등록하고 상담·계약·수수료 정산을 관리합니다.</p>
+          </a>
+          <a class="dashboard-link-card" href="/seller-access">
+            <span>05</span>
             <strong>판매자 접속 기록</strong>
             <p>판매자 로그인 시간과 접속 기기를 확인합니다.</p>
           </a>
           <a class="dashboard-link-card" href="/alimtalk">
-            <span>05</span>
+            <span>06</span>
             <strong>알림톡 상태</strong>
             <p>발송 결과와 실패 이력을 확인하고 재발송합니다.</p>
           </a>
@@ -162,6 +169,7 @@
                   <th>매니저</th>
                   <th>담당 지역</th>
                   <th>아이디</th>
+                  <th>견적 알림톡</th>
                   <th>관리</th>
                 </tr>
               </thead>
@@ -186,7 +194,76 @@
           <div class="message-list" id="messageList"></div>
         </section>
       </section>
+      <section class="panel brand-hall-admin-panel" id="brandHallPanel" hidden>
+        <div class="panel-head brand-admin-head">
+          <div>
+            <p class="eyebrow">Brand Hall Operations</p>
+            <h2>브랜드관 직접 운영</h2>
+            <p class="panel-note">공개 화면에는 채널만 노출하고, 지점·매니저 정보는 관리자에게만 표시합니다. 고객 상담도 픽견적이 먼저 진행합니다.</p>
+          </div>
+          <a class="ghost-btn" href="https://ga-pick.com/brand" target="_blank" rel="noopener">브랜드관 보기</a>
+        </div>
+
+        <div class="brand-admin-grid">
+          <section class="brand-admin-editor">
+            <div class="brand-admin-subhead"><div><p class="eyebrow">Package Editor</p><h3 id="brandPackageFormTitle">패키지 등록</h3></div><button class="plain-btn" id="brandPackageResetBtn" type="button">새 패키지</button></div>
+            <form id="brandPackageAdminForm" class="brand-package-admin-form" novalidate>
+              <input type="hidden" name="packageId" />
+              <label><span class="brand-field-label">연결 판매자 <span class="required-star" aria-label="필수">*</span></span>
+                <select name="sellerId" id="brandPackageSeller" required><option value="">승인 판매자를 선택하세요</option></select>
+              </label>
+              <div class="brand-selected-seller" id="brandSelectedSeller">판매자를 선택하면 내부 지점·매니저 정보가 표시됩니다.</div>
+              <div class="brand-admin-form-row">
+                <label><span class="brand-field-label">브랜드 <span class="required-star" aria-label="필수">*</span></span>
+                  <select name="brand" required><option value="">선택</option><option>LG전자</option><option>삼성전자</option><option>혼합 패키지</option></select>
+                </label>
+                <label>노출 상태
+                  <select name="status"><option value="active">공개</option><option value="hidden">숨김</option></select>
+                </label>
+              </div>
+              <label><span class="brand-field-label">패키지명 <span class="required-star" aria-label="필수">*</span></span><input name="title" maxlength="80" placeholder="예: 신혼 프리미엄 4종 패키지" required /></label>
+              <label><span class="brand-field-label">제품 구성 <span class="required-star" aria-label="필수">*</span> <span class="field-help">한 줄에 한 제품</span></span><textarea name="items" rows="6" placeholder="OLED TV 77인치\n냉장고 870L\n워시타워\n식기세척기" required></textarea></label>
+              <div class="brand-admin-form-row brand-price-row">
+                <label>
+                  <span class="brand-field-label">정상가 <span class="brand-price-label-unit">(만원)</span></span>
+                  <span class="brand-price-input-wrap"><input name="originalPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="예: 2,389" /><span class="brand-input-unit">만원</span></span>
+                  <span class="brand-price-preview" data-brand-price-preview="originalPrice">금액을 입력하면 원 단위로 표시됩니다.</span>
+                </label>
+                <label>
+                  <span class="brand-field-label">판매가 <span class="brand-price-label-unit">(만원)</span> <span class="required-star" aria-label="필수">*</span></span>
+                  <span class="brand-price-input-wrap"><input name="salePrice" type="text" inputmode="decimal" autocomplete="off" placeholder="예: 1,089" required /><span class="brand-input-unit">만원</span></span>
+                  <span class="brand-price-preview" data-brand-price-preview="salePrice">필수 · 실제 판매 금액을 입력하세요.</span>
+                </label>
+              </div>
+              <label>혜택 설명<textarea name="benefits" rows="4" maxlength="1000" placeholder="카드·포인트·설치 혜택 등"></textarea></label>
+              <label>대표 이미지<input name="coverImage" id="brandCoverImageInput" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+              <div class="brand-cover-preview" id="brandCoverPreview">대표 이미지 미리보기</div>
+              <button class="primary-btn brand-package-save" type="submit">서버에 저장</button>
+            </form>
+          </section>
+
+          <section class="brand-admin-packages">
+            <div class="brand-admin-subhead"><div><p class="eyebrow">Published Packages</p><h3>등록 패키지</h3></div><span id="brandPackageAdminCount">0건</span></div>
+            <div class="brand-admin-package-list" id="brandAdminPackageList"></div>
+          </section>
+        </div>
+
+        <section class="brand-admin-consults">
+          <div class="brand-admin-subhead">
+            <div><p class="eyebrow">Consultation & Settlement</p><h3>상담 · 계약 · 수수료 정산</h3></div>
+            <span id="brandConsultAdminCount">0건</span>
+          </div>
+          <div class="brand-consult-admin-table-wrap">
+            <table class="brand-consult-admin-table">
+              <thead><tr><th>접수</th><th>고객</th><th>패키지/판매처</th><th>진행</th><th>계약금액</th><th>수수료</th><th>정산</th><th>관리메모</th><th>저장</th></tr></thead>
+              <tbody id="brandConsultAdminRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
     </main>
+
 
     <div class="admin-loading-modal" id="adminLoadingModal" role="status" aria-live="polite" hidden>
       <div class="admin-loading-box">

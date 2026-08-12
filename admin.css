@@ -906,6 +906,22 @@ button.application-card.is-active {
   white-space: nowrap;
 }
 
+.quote-bid-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quote-bid-row-actions em {
+  justify-self: auto;
+}
+
+.quote-bid-row-actions .danger-btn {
+  white-space: nowrap;
+}
+
 .quote-bid-empty {
   margin: 0;
   padding: 0 12px 12px;
@@ -1738,27 +1754,31 @@ body[data-admin-page="alimtalk"] #alimtalkControl {
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap {
-  overflow-x: visible;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap table {
-  min-width: 0;
+  min-width: 1120px;
   table-layout: fixed;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(1),
 body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(1) {
-  width: 30%;
+  width: 27%;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(2),
 body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(2) {
-  width: 16%;
+  width: 14%;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(3),
 body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(3) {
-  width: 12%;
+  width: 10%;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(4),
@@ -1768,11 +1788,17 @@ body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(4) {
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(5),
 body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(5) {
-  width: 25%;
+  width: 13%;
+}
+
+body[data-admin-page="approvedSellers"] .seller-table-wrap th:nth-child(6),
+body[data-admin-page="approvedSellers"] .seller-table-wrap td:nth-child(6) {
+  width: 19%;
 }
 
 body[data-admin-page="approvedSellers"] .seller-table-wrap td {
   overflow-wrap: anywhere;
+  vertical-align: top;
 }
 
 body[data-admin-page="approvedSellers"] .table-actions {
@@ -2028,6 +2054,10 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
   .quote-bid-row em {
     justify-self: start;
   }
+
+  .quote-bid-row-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* 2026-08-04 visitor stats and single-load navigation */
@@ -2196,3 +2226,225 @@ body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
   .seller-access-summary { grid-template-columns: 1fr; }
 }
 .seller-access-panel[hidden] { display: none !important; }
+
+
+/* 고객 견적 통합 검색 */
+.customer-quote-search {
+  display: grid;
+  gap: 8px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.customer-quote-search > label {
+  color: #263744;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.customer-quote-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-quote-search-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+  outline: none;
+}
+
+.customer-quote-search-row input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(18, 107, 93, 0.12);
+}
+
+.customer-quote-search-row .plain-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.customer-quote-search > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .customer-quote-search {
+    padding: 14px 16px;
+  }
+
+  .customer-quote-search-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-quote-search-row .plain-btn {
+    width: 100%;
+  }
+}
+
+
+/* Brand Hall admin */
+.brand-hall-admin-panel { display: grid; gap: 28px; }
+.brand-admin-head { align-items: flex-start; }
+.brand-admin-grid { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(420px, 1.1fr); gap: 22px; align-items: start; }
+.brand-admin-editor, .brand-admin-packages, .brand-admin-consults { border: 1px solid #e1e8e5; border-radius: 18px; padding: 20px; background: #fff; }
+.brand-admin-subhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.brand-admin-subhead h3 { margin: 2px 0 0; font-size: 1.12rem; }
+.brand-package-admin-form { display: grid; gap: 13px; }
+.brand-package-admin-form label { display: grid; gap: 7px; font-size: .83rem; font-weight: 700; color: #34413e; }
+.brand-package-admin-form input, .brand-package-admin-form select, .brand-package-admin-form textarea,
+.brand-consult-admin-table input, .brand-consult-admin-table select, .brand-consult-admin-table textarea { width: 100%; border: 1px solid #d8e2de; border-radius: 10px; padding: 10px 11px; background: #fff; font: inherit; color: #26312f; }
+.brand-admin-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.brand-selected-seller { min-height: 66px; border-radius: 12px; padding: 12px 14px; background: #f2f8f5; border: 1px solid #d9ebe3; color: #53625e; line-height: 1.55; font-size: .82rem; }
+.brand-selected-seller strong { color: #0f6656; }
+.field-help { font-weight: 500; color: #86928f; }
+.brand-cover-preview { min-height: 130px; display: grid; place-items: center; overflow: hidden; border: 1px dashed #cfdcd7; border-radius: 13px; background: #f8faf9; color: #85918e; }
+.brand-cover-preview img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+.brand-package-save { width: 100%; }
+.brand-admin-package-list { display: grid; gap: 11px; max-height: 720px; overflow: auto; padding-right: 3px; }
+.brand-admin-package-card { border: 1px solid #e1e8e5; border-radius: 14px; padding: 14px; display: grid; grid-template-columns: 82px 1fr auto; gap: 13px; align-items: center; }
+.brand-admin-package-thumb { width: 82px; height: 68px; border-radius: 10px; background: #eef5f2; overflow: hidden; display: grid; place-items: center; color: #0f6656; font-weight: 800; }
+.brand-admin-package-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.brand-admin-package-copy { min-width: 0; }
+.brand-admin-package-copy strong { display: block; color: #23302d; margin-bottom: 4px; }
+.brand-admin-package-copy p { margin: 2px 0; color: #64716e; font-size: .78rem; line-height: 1.45; }
+.brand-admin-package-copy b { color: #0f6656; font-size: .9rem; }
+.brand-admin-package-actions { display: flex; flex-direction: column; gap: 7px; }
+.brand-admin-package-actions button { white-space: nowrap; }
+.brand-admin-consults { margin-top: 2px; }
+.brand-consult-admin-table-wrap { overflow: auto; }
+.brand-consult-admin-table { min-width: 1540px; }
+.brand-consult-admin-table th { white-space: nowrap; }
+.brand-consult-admin-table td { vertical-align: top; min-width: 120px; }
+.brand-consult-admin-table td:nth-child(2) { min-width: 165px; }
+.brand-consult-admin-table td:nth-child(3) { min-width: 240px; }
+.brand-consult-admin-table td:nth-child(8) { min-width: 220px; }
+.brand-consult-admin-table .brand-consult-meta { font-size: .74rem; line-height: 1.5; color: #687572; }
+.brand-consult-admin-table .brand-consult-meta strong { display: block; color: #25322f; font-size: .8rem; }
+.brand-consult-admin-table textarea { min-height: 72px; resize: vertical; }
+.brand-consult-save-btn { white-space: nowrap; }
+.brand-admin-empty { padding: 34px 18px; text-align: center; color: #77837f; background: #f8faf9; border-radius: 13px; }
+@media (max-width: 1120px) { .brand-admin-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .brand-admin-form-row { grid-template-columns: 1fr; } .brand-admin-package-card { grid-template-columns: 68px 1fr; } .brand-admin-package-actions { grid-column: 1 / -1; flex-direction: row; } }
+
+/* 2026-08-08 Brand Hall admin layout containment fix */
+body[data-admin-page="brandHall"] .admin-shell {
+  width: auto;
+  max-width: none;
+}
+
+body[data-admin-page="brandHall"] #brandHallPanel {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+body[data-admin-page="brandHall"] .brand-admin-grid,
+body[data-admin-page="brandHall"] .brand-admin-editor,
+body[data-admin-page="brandHall"] .brand-admin-packages,
+body[data-admin-page="brandHall"] .brand-admin-consults {
+  min-width: 0;
+}
+
+body[data-admin-page="brandHall"] .brand-admin-editor,
+body[data-admin-page="brandHall"] .brand-admin-packages,
+body[data-admin-page="brandHall"] .brand-admin-consults {
+  overflow: hidden;
+}
+
+body[data-admin-page="brandHall"] .brand-consult-admin-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+@media (max-width: 1080px) {
+  body[data-admin-page="brandHall"] .brand-admin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Customer quote selection scope */
+.quote-admin-meta span.quote-selection-chip {
+  background: #eaf8f4;
+  color: #0b6f62;
+  border: 1px solid #bfe7dc;
+}
+.quote-admin-meta span.quote-selection-chip.is-top3 {
+  background: #fff7df;
+  color: #8a5b00;
+  border-color: #f2d38a;
+}
+.quote-bid-summary summary .quote-selection-summary {
+  margin-left: auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eaf8f4;
+  color: #0b6f62;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+.quote-bid-summary summary .quote-selection-summary.is-top3 {
+  background: #fff7df;
+  color: #8a5b00;
+}
+.quote-bid-row em.contact-released {
+  background: #eaf8f4;
+  color: #0b6f62;
+}
+@media (max-width: 720px) {
+  .quote-bid-summary summary { flex-wrap: wrap; }
+  .quote-bid-summary summary .quote-selection-summary { margin-left: 0; }
+}
+
+/* Brand Hall V4: required markers + manwon price inputs */
+.brand-package-admin-form .brand-field-label { display: inline-flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.brand-package-admin-form .required-star { color: #e33d46; font-size: 1em; font-weight: 900; line-height: 1; }
+.brand-package-admin-form .brand-price-label-unit { color: #6f7c78; font-weight: 650; font-size: .78rem; }
+.brand-package-admin-form .brand-price-input-wrap { position: relative; display: block; }
+.brand-package-admin-form .brand-price-input-wrap input { padding-right: 52px; }
+.brand-package-admin-form .brand-input-unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #62706c; font-size: .8rem; font-weight: 800; pointer-events: none; }
+.brand-package-admin-form .brand-price-preview { min-height: 18px; color: #7a8783; font-size: .73rem; font-weight: 600; line-height: 1.4; }
+.brand-package-admin-form .brand-price-preview.has-value { color: #0f6656; }
+.brand-package-admin-form label.brand-field-error input,
+.brand-package-admin-form label.brand-field-error select,
+.brand-package-admin-form label.brand-field-error textarea { border-color: #e33d46 !important; box-shadow: 0 0 0 2px rgba(227,61,70,.08); }
+.brand-package-admin-form label.brand-field-error .brand-field-label { color: #b4232c; }
+
+
+/* 신규 견적 알림톡 수신 설정 */
+.alimtalk-optout-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 92px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  color: #196b5e;
+  user-select: none;
+}
+.alimtalk-optout-control input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #c75146;
+  cursor: pointer;
+}
+.alimtalk-optout-control input:checked + span { color: #b13c35; }
+.alimtalk-optout-control input:disabled { cursor: wait; opacity: .55; }
