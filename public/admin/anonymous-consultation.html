@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>픽견적 익명상담 판정</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#132b46;background:#f4f7fb}body{margin:0}.wrap{max-width:1280px;margin:0 auto;padding:32px 20px}h1{margin:0 0 8px}.toolbar{display:flex;gap:8px;margin:20px 0}input,button,textarea{font:inherit}input{padding:10px;border:1px solid #b8c9da;border-radius:6px;min-width:280px}button{border:1px solid #123f6b;background:#fff;color:#123f6b;border-radius:6px;padding:9px 12px;cursor:pointer}button.approve{background:#123f6b;color:#fff}.table-wrap{overflow:auto;background:#fff;border:1px solid #d5e0ea}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{padding:12px;border-bottom:1px solid #e4ebf2;text-align:left;vertical-align:top}th{background:#edf3f8;font-size:13px}small{color:#63778b}.actions{display:flex;gap:6px;flex-wrap:wrap}.case-message{white-space:pre-wrap;max-width:280px;overflow-wrap:anywhere}.status{font-weight:700}.empty{text-align:center;padding:40px;color:#63778b}
+  </style>
+</head>
+<body><main class="wrap"><h1>익명상담 판정/사례</h1><p>서버가 차단한 메시지만 표시됩니다. 판정 승인 전에는 판매자·지역 제재가 실행되지 않습니다.</p>
+  <div class="toolbar"><input id="token" type="password" placeholder="X-Admin-Token" autocomplete="off" /><button id="load">사례 불러오기</button><span id="notice"></span></div>
+  <div class="table-wrap"><table><thead><tr><th>사례번호</th><th>발생시각</th><th>판매자/지점</th><th>탐지유형</th><th>원문</th><th>정규화/사유</th><th>상태</th><th>판정</th></tr></thead><tbody id="cases"><tr><td class="empty" colspan="8">관리자 토큰을 입력하고 불러오세요.</td></tr></tbody></table></div>
+</main><script>
+const token=document.querySelector('#token'), cases=document.querySelector('#cases'), notice=document.querySelector('#notice');
+function headers(){return {'X-Admin-Token':token.value.trim()};}
+async function load(){const res=await fetch('/api/anonymous-policy-cases',{headers:headers(),cache:'no-store'});const data=await res.json().catch(()=>({}));if(!data.ok){notice.textContent=data.message||'불러오지 못했습니다.';return}notice.textContent=` ${data.rows?.length||0}건`;cases.innerHTML=data.rows?.length?data.rows.map(row=>`<tr><td><small>${row.id}</small></td><td>${row.created_at||''}</td><td>${row.seller_id||''}<br>${row.branch||''}</td><td>${row.detection_type||''}</td><td class="case-message">${esc(row.original_message)}</td><td class="case-message">${esc(row.reason)}<br><small>${esc(row.normalized_message)}</small></td><td class="status">${row.status}<br><small>${row.follow_up_action||''}</small></td><td><div class="actions"><button data-id="${row.id}" data-decision="NOT_VIOLATION">판정 불인정</button><button data-id="${row.id}" data-decision="ADDITIONAL_REVIEW">추가 검토</button><button class="approve" data-id="${row.id}" data-decision="APPROVED">판정 승인</button></div></td></tr>`).join(''):'<tr><td class="empty" colspan="8">사례가 없습니다.</td></tr>'}
+function esc(v){return String(v||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+cases.addEventListener('click',async e=>{const b=e.target.closest('button[data-id]');if(!b)return;const memo=prompt('판정 메모(선택)')||'';const res=await fetch('/api/anonymous-policy-cases/'+encodeURIComponent(b.dataset.id),{method:'PATCH',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({decision:b.dataset.decision,memo})});const data=await res.json().catch(()=>({}));notice.textContent=data.ok?'저장했습니다.':(data.message||'저장하지 못했습니다.');if(data.ok)load()});document.querySelector('#load').addEventListener('click',load);
+</script></body></html>

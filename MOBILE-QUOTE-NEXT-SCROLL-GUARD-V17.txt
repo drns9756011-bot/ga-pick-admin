@@ -1,0 +1,9 @@
+픽견적 노출용 V17 - 모바일 견적등록 다음/이전 단계 전환 스크롤 하강 방지
+
+- 적용 범위: 노출용 견적등록(customer wizard), 모바일 720px 이하
+- 다음/이전 단계 전환 직전 scrollY 기록
+- DOM 교체 후 브라우저 scroll anchoring 때문에 아래로 밀린 경우에만 기존 위치로 복원
+- iOS Safari 키보드/포커스가 남아 발생하는 추가 스크롤 방지를 위해 단계 전환 전 activeElement blur
+- quote wizard에 overflow-anchor:none 적용
+- PC 동작은 변경하지 않음
+- 기존 V16 폰트/브랜드관/알림톡 수신거부 연동 기능 유지
