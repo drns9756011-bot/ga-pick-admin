@@ -7788,7 +7788,7 @@ html.is-mobile-device .header-ad-picture img {
 }
 
 .anonymous-consultation-panel { width: min(720px, calc(100vw - 32px)); padding: 0; overflow: hidden; border: 1px solid #d7e1ec; box-shadow: 0 24px 70px rgba(14, 39, 66, .2); }
-.anonymous-consultation-modal { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 24, 42, .58); }
+.anonymous-consultation-modal { position: fixed; inset: 0; z-index: 100001; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 24, 42, .58); isolation: isolate; }
 .anonymous-consultation-modal[hidden] { display: none !important; }
 .anonymous-consultation-panel { max-height: min(760px, calc(100vh - 48px)); overflow-y: auto; }
 .anonymous-consultation-panel > .eyebrow, .anonymous-consultation-panel > h2 { display: none; }
@@ -7804,7 +7804,7 @@ html.is-mobile-device .header-ad-picture img {
 .anonymous-chat-policy strong { color: #123f6b; white-space: nowrap; }
 .anonymous-consultation-notice { color: #526579; line-height: 1.6; }
 .anonymous-consultation-panel > .anonymous-consultation-notice { margin: 16px 22px 0; font-size: 13px; }
-.anonymous-message-list { display: grid; gap: 10px; max-height: 360px; overflow: auto; padding: 14px; background: #f4f7fb; border: 1px solid #d8e1eb; }
+.anonymous-message-list { position: relative; z-index: 1; display: grid; gap: 10px; max-height: 360px; overflow: auto; padding: 14px; background: #f4f7fb; border: 1px solid #d8e1eb; opacity: 1; }
 .anonymous-message { max-width: 78%; padding: 11px 14px; background: #fff; border: 1px solid #d8e1eb; border-radius: 4px 14px 14px 14px; box-shadow: 0 2px 6px rgba(17, 44, 72, .04); }
 .anonymous-message.is-mine { justify-self: end; background: #e9f0f8; border-color: #b8cbe0; }
 .anonymous-message span { display: block; color: #526579; font-size: 12px; font-weight: 700; margin-bottom: 4px; }
@@ -7815,6 +7815,8 @@ html.is-mobile-device .header-ad-picture img {
 .anonymous-form-actions small { color: #6b7b8d; }
 .anonymous-consult-btn, .seller-anonymous-consult-btn { margin-top: 8px; }
 .seller-anonymous-consult-btn { border-color: #123f6b; color: #123f6b; font-weight: 800; }
+.anonymous-chat-badge { display: inline-grid; place-items: center; min-width: 21px; height: 21px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: #d53c45; color: #fff; font-size: 12px; line-height: 1; font-weight: 900; vertical-align: middle; }
+.anonymous-chat-badge[hidden] { display: none; }
 @media (max-width: 560px) { .anonymous-chat-policy { align-items: flex-start; flex-direction: column; gap: 3px; } .anonymous-message { max-width: 88%; } .anonymous-form-actions { align-items: stretch; flex-direction: column; } .anonymous-form-actions button { width: 100%; } }
 @media (max-width: 560px) { .anonymous-consultation-modal { padding: 12px; } .anonymous-consultation-panel { width: 100%; max-height: calc(100vh - 24px); } }
 

@@ -1,4 +1,5 @@
-﻿{
+{
+  "name": "ga-pick-public",
+  "private": true,
   "type": "module"
 }
-

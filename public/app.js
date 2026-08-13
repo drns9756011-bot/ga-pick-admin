@@ -775,7 +775,13 @@ async function openAnonymousConsultation(request, bid, role = "customer") {
     </div>`;
     document.body.appendChild(modal);
     modal.querySelector('.anonymous-consultation-panel').insertAdjacentHTML('afterbegin', `<div class="anonymous-chat-header"><div class="anonymous-chat-avatar" aria-hidden="true"><img src="/assets/pickquote-official-symbol-navy.png" alt="" /></div><div><span class="anonymous-chat-kicker">안전한 견적 상담</span><strong>선택 전 익명상담</strong><p data-anonymous-context>견적 조건을 익명으로 확인하는 중</p></div><button class="modal-close" type="button" data-anonymous-close aria-label="닫기">×</button></div><div class="anonymous-chat-policy"><strong>개인정보 보호 안내</strong><span>전화번호, 링크, 메신저, 매장 정보는 공유할 수 없습니다.</span></div>`);
-    modal.addEventListener("click", (event) => { if (event.target === modal || event.target.closest("[data-anonymous-close]")) modal.hidden = true; });
+    modal.addEventListener("click", (event) => { if (event.target === modal || event.target.closest("[data-anonymous-close]")) closeAnonymousConsultation(); });
+    modal.querySelector("[data-anonymous-form] textarea").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        event.currentTarget.form.requestSubmit();
+      }
+    });
     modal.querySelector("[data-anonymous-form]").addEventListener("submit", async (event) => {
       event.preventDefault();
       const field = event.currentTarget.elements.message;
@@ -801,6 +807,12 @@ async function openAnonymousConsultation(request, bid, role = "customer") {
   } finally { anonymousConsultationLoading = false; }
 }
 
+function closeAnonymousConsultation() {
+  const modal = document.querySelector("#anonymousConsultationModal");
+  if (modal) modal.hidden = true;
+  activeAnonymousConsultation = null;
+}
+
 async function refreshAnonymousConsultation(modal) {
   if (!activeAnonymousConsultation?.id) return;
   const result = await apiJson(`/api/anonymous-consultations?id=${encodeURIComponent(activeAnonymousConsultation.id)}`, { method: "GET" });
@@ -808,6 +820,12 @@ async function refreshAnonymousConsultation(modal) {
   if (!result?.ok) { list.innerHTML = `<p class="empty-state">상담 내용을 불러오지 못했습니다.</p>`; return; }
   const rows = result.rows || [];
   list.innerHTML = rows.length ? rows.map((row) => `<div class="anonymous-message ${row.sender_role === activeAnonymousConsultation.role ? "is-mine" : ""}"><span>${row.sender_role === "seller" ? "판매자" : "고객"}</span><p>${escapeHTML(row.body)}</p></div>`).join("") : `<p class="empty-state">아직 메시지가 없습니다.</p>`;
+  const incomingCount = rows.filter((row) => row.sender_role !== activeAnonymousConsultation.role).length;
+  document.querySelectorAll("[data-anonymous-chat-badge]").forEach((badge) => {
+    if (String(badge.dataset.requestId || "") !== String(activeAnonymousConsultation.quoteId || "")) return;
+    badge.textContent = incomingCount > 99 ? "99+" : String(incomingCount);
+    badge.hidden = incomingCount === 0;
+  });
   list.scrollTop = list.scrollHeight;
 }
 
@@ -2104,7 +2122,7 @@ function renderBidCards(request) {
             }" data-bid-id="${bid.id}" ${isLockedBySelection && !isSelected ? "disabled" : ""}>
               ${isSelected ? "선택 완료" : isLockedBySelection ? "선택 변경 불가" : "이 제안 선택"}
             </button>
-            ${!isSelected && !isLockedBySelection ? `<button class="secondary-btn full anonymous-consult-btn" type="button" data-request-id="${request.id}" data-bid-id="${bid.id}">궁금한 점 물어보기</button>` : ""}
+            ${!isSelected && !isLockedBySelection ? `<button class="secondary-btn full anonymous-consult-btn" type="button" data-request-id="${request.id}" data-bid-id="${bid.id}">궁금한 점 물어보기 <span class="anonymous-chat-badge" data-anonymous-chat-badge data-request-id="${request.id}" hidden>0</span></button>` : ""}
             ${reviewArea}
           </div>
         </article>
@@ -3468,6 +3486,12 @@ regionChangeForm.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const anonymousModal = document.querySelector("#anonymousConsultationModal");
+  if (event.key === "Escape" && anonymousModal && !anonymousModal.hidden) {
+    closeAnonymousConsultation();
+    return;
+  }
+
   if (event.key === "Escape" && !privacyConsentModal.hidden) {
     closeConsentModal();
     return;
@@ -3716,7 +3740,7 @@ function renderSelectedRequest() {
     }
   `;
   const sellerChatButton = selectedInfo.querySelector('.seller-anonymous-consult-btn');
-  if (sellerChatButton) sellerChatButton.textContent = '익명상담 확인하기';
+  if (sellerChatButton) sellerChatButton.innerHTML = '익명상담 확인하기 <span class="anonymous-chat-badge" data-anonymous-chat-badge data-request-id="' + request.id + '" hidden>0</span>';
   sellerImage.innerHTML = isWithoutQuoteRequest(request)
     ? withoutQuoteItemsMarkup(request)
     : quoteImageMarkup(request, `${request.customer} 고객님이 올린 견적서`);
