@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>픽견적 관리자</title>
     <meta name="description" content="픽견적 판매자 신청, 고객 견적, 알림톡 발송 상태를 관리하는 운영 페이지입니다." />
-    <link rel="stylesheet" href="/admin.css?v=20260804-seller-access" />
-    <script defer src="/admin.js?v=20260805-mobile-image-r2-fix-v1" charset="utf-8"></script>
+    <link rel="stylesheet" href="/admin.css?v=20260729-admin-mobile-modal-fix" />
+    <script defer src="/admin.js?v=20260729-admin-mobile-modal-fix" charset="utf-8"></script>
   </head>
   <body>
     <aside class="sidebar">
@@ -23,8 +23,8 @@
         <a href="/customers" data-admin-nav="customers">고객 견적</a>
         <a href="/sellers" data-admin-nav="sellers">판매자 신청</a>
         <a href="/approved-sellers" data-admin-nav="approvedSellers">승인 판매자</a>
-        <a href="/seller-access" data-admin-nav="sellerAccess">판매자 접속 기록</a>
         <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
+        <a href="/anonymous-consultation" data-admin-nav="anonymousConsultation">익명상담 판정</a>
       </nav>
       <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면으로</a>
     </aside>
@@ -68,13 +68,8 @@
             <strong>승인 판매자</strong>
             <p>판매자 계정, 지점, 매니저 정보를 관리합니다.</p>
           </a>
-          <a class="dashboard-link-card" href="/seller-access">
-            <span>04</span>
-            <strong>판매자 접속 기록</strong>
-            <p>판매자 로그인 시간과 접속 기기를 확인합니다.</p>
-          </a>
           <a class="dashboard-link-card" href="/alimtalk">
-            <span>05</span>
+            <span>04</span>
             <strong>알림톡 상태</strong>
             <p>발송 결과와 실패 이력을 확인하고 재발송합니다.</p>
           </a>
@@ -105,47 +100,6 @@
         <aside class="panel detail-panel" id="applicationDetail"></aside>
       </section>
 
-
-
-      <section class="panel seller-access-panel" id="sellerAccessPanel" hidden>
-        <div class="panel-head seller-access-head">
-          <div>
-            <p class="eyebrow">Seller Access</p>
-            <h2>판매자 접속 기록</h2>
-            <p class="panel-note">성공한 판매자 로그인을 기록합니다. IP는 원문이 아닌 마스킹된 값만 표시합니다.</p>
-          </div>
-          <div class="seller-access-tools">
-            <label>조회 기간
-              <select id="sellerAccessDays">
-                <option value="7">최근 7일</option>
-                <option value="30" selected>최근 30일</option>
-                <option value="90">최근 90일</option>
-                <option value="365">최근 1년</option>
-              </select>
-            </label>
-            <label>기록 검색
-              <input id="sellerAccessSearch" type="search" placeholder="아이디, 지점, 매니저, 채널 검색" />
-            </label>
-          </div>
-        </div>
-        <div class="seller-access-summary" id="sellerAccessSummary"></div>
-        <div class="seller-access-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>접속 일시</th>
-                <th>채널</th>
-                <th>지점</th>
-                <th>매니저</th>
-                <th>아이디</th>
-                <th>기기·브라우저</th>
-                <th>접속 IP</th>
-              </tr>
-            </thead>
-            <tbody id="sellerAccessRows"></tbody>
-          </table>
-        </div>
-      </section>
       <section class="grid-two" id="adminSecondaryGrid">
         <section class="panel" id="approvedSellers">
           <div class="panel-head">

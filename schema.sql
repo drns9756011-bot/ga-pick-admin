@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS seller_applications (
+﻿CREATE TABLE IF NOT EXISTS seller_applications (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'pending',
   requested_at TEXT NOT NULL,
@@ -40,8 +40,7 @@ CREATE TABLE IF NOT EXISTS approved_sellers (
   requested_at TEXT DEFAULT '',
   reviewed_at TEXT DEFAULT '',
   review_memo TEXT DEFAULT '',
-  approved_at TEXT NOT NULL,
-  quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0
+  approved_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_approved_sellers_seller_id ON approved_sellers(seller_id);
@@ -155,50 +154,3 @@ CREATE TABLE IF NOT EXISTS deleted_quote_logs (
 
 CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at);
 
-CREATE TABLE IF NOT EXISTS site_visit_daily (
-  visit_date TEXT PRIMARY KEY,
-  page_views INTEGER NOT NULL DEFAULT 0,
-  unique_visitors INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS site_visit_uniques (
-  visit_date TEXT NOT NULL,
-  visitor_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (visit_date, visitor_hash)
-);
-
-CREATE TABLE IF NOT EXISTS site_visit_events (
-  event_key TEXT PRIMARY KEY,
-  visit_date TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_site_visit_events_date ON site_visit_events(visit_date);
-
-CREATE TABLE IF NOT EXISTS seller_access_logs (
-  id TEXT PRIMARY KEY,
-  seller_id TEXT NOT NULL,
-  access_type TEXT NOT NULL DEFAULT 'login',
-  access_date TEXT NOT NULL,
-  accessed_at TEXT NOT NULL,
-  ip_masked TEXT DEFAULT '',
-  ip_hash TEXT DEFAULT '',
-  user_agent TEXT DEFAULT '',
-  device_type TEXT DEFAULT '',
-  browser_name TEXT DEFAULT '',
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_seller_access_logs_seller_time ON seller_access_logs(seller_id, accessed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_seller_access_logs_date ON seller_access_logs(access_date, accessed_at DESC);
-
-
-CREATE TABLE IF NOT EXISTS deleted_seller_accounts (
-  seller_id TEXT PRIMARY KEY,
-  approved_seller_id TEXT DEFAULT '',
-  channel TEXT DEFAULT '',
-  branch TEXT DEFAULT '',
-  manager TEXT DEFAULT '',
-  deleted_at TEXT NOT NULL,
-  delete_reason TEXT DEFAULT ''
-);

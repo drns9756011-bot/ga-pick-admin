@@ -1,4 +1,4 @@
-const jsonHeaders = {
+﻿const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -32,34 +32,15 @@ function json(payload, status = 200) {
   });
 }
 
-function getAdminTokenEntries(env) {
-  const candidates = [
-    ["ADMIN_API_TOKEN", env?.ADMIN_API_TOKEN],
-    ["ADMIN_TOKEN", env?.ADMIN_TOKEN],
-    ["ADMIN_API_SECRET", env?.ADMIN_API_SECRET],
-  ];
-  const seen = new Set();
-  return candidates
-    .map(([name, value]) => ({ name, value: String(value || "").trim() }))
-    .filter((entry) => entry.value && !seen.has(entry.value) && seen.add(entry.value));
-}
-
-function getAdminTokens(env) {
-  return getAdminTokenEntries(env).map((entry) => entry.value);
+function getAdminToken(env) {
+  return String(env.ADMIN_API_TOKEN || "").trim();
 }
 
 function requireAdmin(request, env) {
-  const expectedTokens = getAdminTokens(env);
-  if (!expectedTokens.length) {
-    return json({
-      ok: false,
-      code: "ADMIN_TOKEN_NOT_CONFIGURED",
-      message: "Cloudflare 관리자 Worker에 ADMIN_API_TOKEN Secret이 설정되지 않았습니다.",
-    }, 503);
-  }
-  const bearer = String(request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  const actual = String(request.headers.get("X-Admin-Token") || bearer || "").trim();
-  if (!expectedTokens.includes(actual)) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
+  const expected = getAdminToken(env);
+  if (!expected) return json({ ok: false, message: "ADMIN_API_TOKEN 설정이 필요합니다." }, 500);
+  const actual = String(request.headers.get("X-Admin-Token") || "").trim();
+  if (actual !== expected) return json({ ok: false, message: "관리자 인증이 필요합니다." }, 401);
   return null;
 }
 
@@ -176,7 +157,6 @@ function normalizeApprovedSeller(row) {
     reviewedAt: row.reviewed_at || "",
     reviewMemo: row.review_memo || "",
     approvedAt: row.approved_at || "",
-    quoteAlimtalkOptOut: Number(row.quote_alimtalk_opt_out || 0) === 1,
   };
 }
 
@@ -225,25 +205,10 @@ function parseJson(value, fallback) {
   }
 }
 
-function storedFileUrl(objectKey, fallbackUrl = "") {
-  const key = String(objectKey || "").trim();
-  if (key) {
-    return `/api/files/${key.split("/").map((part) => encodeURIComponent(part)).join("/")}`;
-  }
-  return String(fallbackUrl || "");
-}
-
-function normalizedStoredImage(image) {
-  if (!image) return { url: "" };
-  return { ...image, url: storedFileUrl(image.object_key || image.objectKey, image.url || "") };
-}
-
 function normalizeCustomerQuote(row, images = []) {
   if (!row) return null;
-  const normalizedImages = images.map(normalizedStoredImage);
-  const fullImages = normalizedImages.filter((image) => image.image_type !== "thumbnail");
-  const thumbnailUrl = storedFileUrl(row.thumbnail_image_key, row.thumbnail_image || "");
-  const displayImages = fullImages.length ? fullImages : thumbnailUrl ? [{ url: thumbnailUrl }] : [];
+  const fullImages = images.filter((image) => image.image_type !== "thumbnail");
+  const displayImages = fullImages.length ? fullImages : row.thumbnail_image ? [{ url: row.thumbnail_image }] : [];
   const bids = Array.isArray(row.bids) ? row.bids : [];
   return {
     id: row.id,
@@ -259,19 +224,17 @@ function normalizeCustomerQuote(row, images = []) {
     memo: row.memo || "",
     status: row.status || "open",
     selectedBidId: row.selected_bid_id || null,
-    contactReleaseScope: row.contact_release_scope || "selected",
-    contactReleasedBidIds: parseJson(row.contact_released_bid_ids, []),
     bidCount: Number(row.bid_count || bids.length || 0),
     bids,
     saleCompletedAt: row.sale_completed_at || "",
-    thumbnailImage: thumbnailUrl,
+    thumbnailImage: row.thumbnail_image || "",
     thumbnailImageKey: row.thumbnail_image_key || "",
     quoteExpiresAt: row.quote_expires_at || "",
     fullImagesExpiresAt: row.full_images_expires_at || "",
     personalExpiresAt: row.personal_expires_at || "",
     createdAt: row.created_at || "",
     consent: parseJson(row.consent_json, {}),
-    image: displayImages[0]?.url || thumbnailUrl,
+    image: displayImages[0]?.url || row.thumbnail_image || "",
     images: displayImages.map((image) => image.url),
   };
 }
@@ -314,6 +277,21 @@ function normalizeBid(row) {
   };
 }
 
+function dataUrlInfo(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const contentType = match[1];
+  const base64 = match[2];
+  const ext = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+  }[contentType] || "bin";
+  return { contentType, base64, ext };
+}
+
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -323,59 +301,15 @@ function base64ToArrayBuffer(base64) {
   return bytes;
 }
 
-function detectFileContentType(bytes, declaredType = "") {
-  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
-  const ascii = (start, length) => String.fromCharCode(...data.slice(start, start + length));
-  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
-  if (data.length >= 8 && data[0] === 0x89 && ascii(1, 3) === "PNG") return "image/png";
-  if (data.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return "image/webp";
-  if (data.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
-  if (data.length >= 5 && ascii(0, 5) === "%PDF-") return "application/pdf";
-  if (data.length >= 12 && ascii(4, 4) === "ftyp") {
-    const brand = ascii(8, 4).toLowerCase();
-    if (["heic", "heix", "hevc", "hevx", "heif", "mif1", "msf1"].includes(brand)) return "image/heic";
-    if (["avif", "avis"].includes(brand)) return "image/avif";
-  }
-  return String(declaredType || "application/octet-stream").toLowerCase();
-}
-
-function extensionForContentType(contentType) {
-  return {
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/gif": "gif",
-    "image/heic": "heic",
-    "image/heif": "heif",
-    "image/avif": "avif",
-    "application/pdf": "pdf",
-  }[contentType] || "bin";
-}
-
-function isBrowserSafeQuoteImageType(contentType) {
-  return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(String(contentType || "").toLowerCase());
-}
-
-function dataUrlInfo(dataUrl) {
-  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return null;
-  const declaredType = String(match[1] || "").toLowerCase();
-  const base64 = match[2];
-  const bytes = base64ToArrayBuffer(base64);
-  const contentType = detectFileContentType(bytes, declaredType);
-  return { contentType, declaredType, base64, bytes, ext: extensionForContentType(contentType) };
-}
-
 async function saveDataUrlToR2(env, dataUrl, prefix, id) {
   const info = dataUrlInfo(dataUrl);
-  if (!info || !env.FILES) return { url: dataUrl || "", key: "", contentType: info?.contentType || "" };
+  if (!info || !env.FILES) return { url: dataUrl || "", key: "" };
 
   const key = `${prefix}/${id}.${info.ext}`;
-  await env.FILES.put(key, info.bytes, {
+  await env.FILES.put(key, base64ToArrayBuffer(info.base64), {
     httpMetadata: { contentType: info.contentType },
   });
-  return { key, url: `/api/files/${key}`, contentType: info.contentType };
+  return { key, url: `/api/files/${key}` };
 }
 
 async function ensureAlimtalkColumns(env) {
@@ -686,159 +620,12 @@ async function queueAlimtalk(env, message) {
   return { id, ...result };
 }
 
-
-async function tableExists(env, tableName) {
-  const row = await env.DB.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
-  ).bind(String(tableName || "")).first();
-  return Boolean(row?.name);
-}
-
-async function ensureSellerTablesAndColumns(env) {
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS seller_applications (
-      id TEXT PRIMARY KEY,
-      status TEXT NOT NULL DEFAULT 'pending',
-      requested_at TEXT DEFAULT '',
-      reviewed_at TEXT DEFAULT '',
-      review_memo TEXT DEFAULT '',
-      seller_id TEXT NOT NULL,
-      password TEXT DEFAULT '',
-      channel TEXT DEFAULT '',
-      branch TEXT DEFAULT '',
-      branch_region TEXT DEFAULT '',
-      manager TEXT DEFAULT '',
-      manager_position TEXT DEFAULT '',
-      phone TEXT DEFAULT '',
-      card_image TEXT DEFAULT '',
-      card_image_key TEXT DEFAULT '',
-      memo TEXT DEFAULT '',
-      consent_json TEXT DEFAULT '{}'
-    )`
-  ).run();
-
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS approved_sellers (
-      id TEXT PRIMARY KEY,
-      status TEXT NOT NULL DEFAULT 'approved',
-      seller_id TEXT NOT NULL UNIQUE,
-      password TEXT DEFAULT '',
-      channel TEXT DEFAULT '',
-      branch TEXT DEFAULT '',
-      branch_region TEXT DEFAULT '',
-      manager TEXT DEFAULT '',
-      manager_position TEXT DEFAULT '',
-      phone TEXT DEFAULT '',
-      card_image TEXT DEFAULT '',
-      card_image_key TEXT DEFAULT '',
-      memo TEXT DEFAULT '',
-      consent_json TEXT DEFAULT '{}',
-      requested_at TEXT DEFAULT '',
-      reviewed_at TEXT DEFAULT '',
-      review_memo TEXT DEFAULT '',
-      approved_at TEXT DEFAULT '',
-      quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0
-    )`
-  ).run();
-
-  const statements = [
-    "ALTER TABLE seller_applications ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'",
-    "ALTER TABLE seller_applications ADD COLUMN requested_at TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN reviewed_at TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN review_memo TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN seller_id TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN password TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN channel TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN branch TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN branch_region TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN manager TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN manager_position TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN phone TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN card_image TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN card_image_key TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN memo TEXT DEFAULT ''",
-    "ALTER TABLE seller_applications ADD COLUMN consent_json TEXT DEFAULT '{}'",
-    "ALTER TABLE approved_sellers ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'",
-    "ALTER TABLE approved_sellers ADD COLUMN seller_id TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN password TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN channel TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN branch TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN branch_region TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN manager TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN manager_position TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN phone TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN card_image TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN card_image_key TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN memo TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN consent_json TEXT DEFAULT '{}'",
-    "ALTER TABLE approved_sellers ADD COLUMN requested_at TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN reviewed_at TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN review_memo TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN approved_at TEXT DEFAULT ''",
-    "ALTER TABLE approved_sellers ADD COLUMN quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0",
-  ];
-
-  for (const statement of statements) {
-    try {
-      await env.DB.prepare(statement).run();
-    } catch (error) {
-      // 이미 존재하는 컬럼은 그대로 사용합니다.
-    }
-  }
-
-  try {
-    await env.DB.prepare(
-      "CREATE UNIQUE INDEX IF NOT EXISTS idx_approved_sellers_seller_id ON approved_sellers(seller_id)"
-    ).run();
-  } catch (error) {
-    // 과거 중복 계정이 있으면 목록 조회는 계속 진행합니다.
-  }
-}
-
-async function ensureDeletedSellerTables(env) {
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS deleted_seller_accounts (
-      seller_id TEXT PRIMARY KEY,
-      approved_seller_id TEXT DEFAULT '',
-      channel TEXT DEFAULT '',
-      branch TEXT DEFAULT '',
-      manager TEXT DEFAULT '',
-      deleted_at TEXT NOT NULL,
-      delete_reason TEXT DEFAULT ''
-    )`
-  ).run();
-}
-
-async function tablesWithColumn(env, columnName) {
-  const tables = await env.DB.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-  ).all();
-  const matched = [];
-
-  for (const row of tables.results || []) {
-    const name = String(row.name || "");
-    if (!/^[A-Za-z0-9_]+$/.test(name)) continue;
-    try {
-      const info = await env.DB.prepare(`PRAGMA table_info("${name}")`).all();
-      if ((info.results || []).some((column) => String(column.name || "") === columnName)) {
-        matched.push(name);
-      }
-    } catch (error) {
-      // 읽을 수 없는 보조 테이블은 건너뜁니다.
-    }
-  }
-
-  return matched;
-}
-
 async function getSellerApplications(env) {
-  await ensureSellerTablesAndColumns(env);
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
 }
 
 async function updateSellerApplication(env, request, id) {
-  await ensureSellerTablesAndColumns(env);
   const body = await request.json();
   const rawRow = await env.DB.prepare("SELECT * FROM seller_applications WHERE id = ?").bind(id).first();
   const row = normalizeSellerApplication(rawRow);
@@ -848,14 +635,11 @@ async function updateSellerApplication(env, request, id) {
   const reviewMemo = body.reviewMemo || row.reviewMemo || "";
   const reviewedAt = new Date().toISOString();
 
-  const applicationUpdate = await env.DB.prepare(
+  await env.DB.prepare(
     "UPDATE seller_applications SET status = ?, reviewed_at = ?, review_memo = ? WHERE id = ?"
   )
     .bind(status, reviewedAt, reviewMemo, id)
     .run();
-  if (Number(applicationUpdate?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "판매자 신청 상태가 서버에 저장되지 않았습니다." }, 500);
-  }
 
   const updated = {
     ...row,
@@ -866,10 +650,6 @@ async function updateSellerApplication(env, request, id) {
 
   if (status === "approved") {
     const approvedAt = reviewedAt;
-    await ensureDeletedSellerTables(env);
-    await env.DB.prepare("DELETE FROM deleted_seller_accounts WHERE seller_id = ?")
-      .bind(updated.sellerId)
-      .run();
     await env.DB.prepare(
       `INSERT OR REPLACE INTO approved_sellers
         (id, status, seller_id, password, channel, branch, branch_region, manager, manager_position, phone,
@@ -937,34 +717,12 @@ async function updateSellerApplication(env, request, id) {
     });
   }
 
-  let approvedSeller = null;
-  if (status === "approved") {
-    approvedSeller = normalizeApprovedSeller(
-      await env.DB.prepare("SELECT * FROM approved_sellers WHERE seller_id = ?")
-        .bind(updated.sellerId)
-        .first()
-    );
-  }
-  return json({ ok: true, row: updated, approvedSeller });
+  return json({ ok: true, row: updated });
 }
 
 async function getApprovedSellers(env) {
-  await ensureSellerTablesAndColumns(env);
-  // 조회 과정에서 판매자 계정을 자동 복구하지 않습니다.
-  // 승인/삭제는 관리자 작업에서만 명시적으로 변경됩니다.
-  const repairedCount = 0;
-  const result = await env.DB.prepare(
-    `SELECT * FROM approved_sellers
-      WHERE LOWER(TRIM(COALESCE(status, 'approved'))) NOT IN ('deleted', 'rejected', 'disabled')
-      ORDER BY CASE WHEN approved_at = '' THEN 1 ELSE 0 END, approved_at DESC, rowid DESC`
-  ).all();
-
-  const rows = (result.results || []).map((row) => normalizeApprovedSeller({
-    ...row,
-    status: row.status || "approved",
-  }));
-
-  return json({ ok: true, rows, repairedCount });
+  const result = await env.DB.prepare("SELECT * FROM approved_sellers ORDER BY approved_at DESC").all();
+  return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
 }
 
 async function ensureDeletedQuoteLogTable(env) {
@@ -992,10 +750,6 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN full_images_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN personal_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN desired_brand TEXT DEFAULT ''",
-    "ALTER TABLE customer_quotes ADD COLUMN contact_release_scope TEXT DEFAULT 'selected'",
-    "ALTER TABLE customer_quotes ADD COLUMN contact_released_bid_ids TEXT DEFAULT '[]'",
-    "ALTER TABLE customer_quotes ADD COLUMN sale_completed_at TEXT DEFAULT ''",
-    "ALTER TABLE customer_quotes ADD COLUMN rank_notice_queued_at TEXT DEFAULT ''",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];
@@ -1046,66 +800,6 @@ async function getCustomerQuotes(env) {
   }
 
   return json({ ok: true, rows });
-}
-
-
-async function deleteBidAdmin(env, bidIdValue) {
-  await ensureCustomerQuoteColumns(env);
-  const bidId = String(bidIdValue || "").trim();
-  if (!bidId) return json({ ok: false, message: "삭제할 제안 정보가 필요합니다." }, 400);
-
-  const bid = await env.DB.prepare("SELECT * FROM bids WHERE id = ? LIMIT 1").bind(bidId).first();
-  if (!bid) return json({ ok: false, message: "삭제할 판매자 제안을 찾을 수 없습니다." }, 404);
-
-  const quoteId = String(bid.quote_id || "").trim();
-  const quote = quoteId
-    ? await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(quoteId).first()
-    : null;
-
-  try {
-    await env.DB.prepare("DELETE FROM reviews WHERE bid_id = ?").bind(bidId).run();
-  } catch (error) {
-    // reviews 테이블이 없거나 이미 정리된 경우에도 제안 삭제는 계속 진행합니다.
-  }
-
-  await env.DB.prepare("DELETE FROM bids WHERE id = ?").bind(bidId).run();
-  const verify = await env.DB.prepare("SELECT id FROM bids WHERE id = ? LIMIT 1").bind(bidId).first();
-  if (verify?.id) return json({ ok: false, message: "판매자 제안이 서버에서 삭제되지 않았습니다." }, 500);
-
-  if (quote) {
-    const currentReleasedIds = parseJson(quote.contact_released_bid_ids, []).map((value) => String(value || ""));
-    const releasedIds = currentReleasedIds.filter((value) => value && value !== bidId);
-    const wasSelected = String(quote.selected_bid_id || "") === bidId;
-
-    if (wasSelected) {
-      const now = new Date();
-      const expiresAt = quote.quote_expires_at ? new Date(quote.quote_expires_at) : null;
-      const canReopen = expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > now.getTime();
-
-      await env.DB.prepare(
-        `UPDATE customer_quotes
-         SET selected_bid_id = '', contact_release_scope = 'selected', contact_released_bid_ids = '[]',
-             sale_completed_at = '', status = ?, rank_notice_queued_at = ''
-         WHERE id = ?`
-      ).bind(canReopen ? "open" : "closed", quoteId).run();
-    } else if (releasedIds.length !== currentReleasedIds.length) {
-      await env.DB.prepare(
-        "UPDATE customer_quotes SET contact_released_bid_ids = ? WHERE id = ?"
-      ).bind(JSON.stringify(releasedIds), quoteId).run();
-    }
-  }
-
-  let updatedQuote = null;
-  if (quoteId) {
-    const nextQuote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(quoteId).first();
-    if (nextQuote) {
-      const images = await getQuoteImages(env, quoteId);
-      const bids = await getQuoteBids(env, quoteId);
-      updatedQuote = normalizeCustomerQuote({ ...nextQuote, bid_count: bids.length, bids }, images);
-    }
-  }
-
-  return json({ ok: true, deletedBidId: bidId, quoteId, row: updatedQuote });
 }
 
 async function getDeletedQuoteLogs(env) {
@@ -1179,85 +873,6 @@ async function getLplanTrainingQuotes(env, request) {
   });
 }
 
-async function replaceCustomerQuoteImages(env, request, id) {
-  await ensureCustomerQuoteColumns(env);
-  const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
-  if (!quote) return json({ ok: false, message: "고객 견적을 찾을 수 없습니다." }, 404);
-  if (!env.FILES) return json({ ok: false, message: "R2 이미지 저장소 연결이 필요합니다." }, 500);
-
-  const body = await request.json();
-  const images = Array.isArray(body.images) ? body.images.slice(0, 4).filter(Boolean) : [];
-  if (!images.length) return json({ ok: false, message: "교체할 견적서 이미지를 선택해주세요." }, 400);
-
-  const invalid = images.find((dataUrl) => {
-    const info = dataUrlInfo(dataUrl);
-    return !info || !isBrowserSafeQuoteImageType(info.contentType);
-  });
-  if (invalid) {
-    return json({ ok: false, message: "JPG, PNG 또는 WebP 이미지만 등록할 수 있습니다." }, 415);
-  }
-
-  const thumbnailDataUrl = body.thumbnailImage || images[0];
-  const newKeys = [];
-  let thumbnail;
-  const originals = [];
-  try {
-    thumbnail = await saveDataUrlToR2(env, thumbnailDataUrl, "quote-thumbnails", `${id}-thumb-${Date.now()}`);
-    if (!thumbnail.key) throw new Error("대표 이미지 저장에 실패했습니다.");
-    newKeys.push(thumbnail.key);
-    for (let index = 0; index < images.length; index += 1) {
-      const saved = await saveDataUrlToR2(env, images[index], "quote-originals", `${id}-${Date.now()}-${index + 1}`);
-      if (!saved.key) throw new Error(`견적서 이미지 ${index + 1} 저장에 실패했습니다.`);
-      originals.push(saved);
-      newKeys.push(saved.key);
-    }
-  } catch (error) {
-    await Promise.all(newKeys.map(async (key) => { try { await env.FILES.delete(key); } catch (_) {} }));
-    return json({ ok: false, message: error?.message || "이미지 저장에 실패했습니다." }, 500);
-  }
-
-  const oldImages = await env.DB.prepare("SELECT object_key FROM quote_images WHERE quote_id = ?").bind(id).all();
-  const now = new Date();
-  const createdAt = now.toISOString();
-  const fullExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const personalExpiresAt = quote.personal_expires_at || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
-
-  const statements = [
-    env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id),
-    env.DB.prepare("UPDATE customer_quotes SET thumbnail_image = ?, thumbnail_image_key = ?, full_images_expires_at = ? WHERE id = ?")
-      .bind(thumbnail.url, thumbnail.key, fullExpiresAt, id),
-    env.DB.prepare(
-      `INSERT INTO quote_images (id, quote_id, object_key, url, image_type, sort_order, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(createId("qimg"), id, thumbnail.key, thumbnail.url, "thumbnail", 0, personalExpiresAt, createdAt),
-  ];
-  originals.forEach((saved, index) => {
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO quote_images (id, quote_id, object_key, url, image_type, sort_order, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(createId("qimg"), id, saved.key, saved.url, "full", index + 1, fullExpiresAt, createdAt)
-    );
-  });
-
-  try {
-    await env.DB.batch(statements);
-  } catch (error) {
-    await Promise.all(newKeys.map(async (key) => { try { await env.FILES.delete(key); } catch (_) {} }));
-    return json({ ok: false, message: error?.message || "이미지 정보를 저장하지 못했습니다." }, 500);
-  }
-
-  await Promise.all((oldImages.results || []).map(async (row) => {
-    const key = String(row.object_key || "");
-    if (!key || newKeys.includes(key)) return;
-    try { await env.FILES.delete(key); } catch (_) {}
-  }));
-
-  const updated = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
-  const updatedImages = await getQuoteImages(env, id);
-  return json({ ok: true, row: normalizeCustomerQuote(updated, updatedImages) });
-}
-
 async function deleteCustomerQuote(env, request, id) {
   await ensureCustomerQuoteColumns(env);
   await ensureDeletedQuoteLogTable(env);
@@ -1270,86 +885,42 @@ async function deleteCustomerQuote(env, request, id) {
   const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
   if (!quote) return json({ ok: false, message: "삭제할 고객 견적을 찾을 수 없습니다." }, 404);
 
-  const objectKeys = new Set();
-  if (quote.thumbnail_image_key) objectKeys.add(String(quote.thumbnail_image_key));
-
-  if (await tableExists(env, "quote_images")) {
-    try {
-      const images = await env.DB.prepare("SELECT object_key FROM quote_images WHERE quote_id = ?").bind(id).all();
-      for (const image of images.results || []) {
-        if (image.object_key) objectKeys.add(String(image.object_key));
-      }
-    } catch (error) {
-      console.warn("삭제 대상 이미지 조회 실패", error);
-    }
-  }
-
-  const relatedTables = (await tablesWithColumn(env, "quote_id"))
-    .filter((name) => !["customer_quotes", "deleted_quote_logs"].includes(name));
-  const priority = new Map([
-    ["reviews", 0],
-    ["quote_images", 1],
-    ["bids", 2],
-  ]);
-  relatedTables.sort((a, b) => (priority.get(a) ?? 20) - (priority.get(b) ?? 20));
-
-  const statements = relatedTables.map((tableName) =>
-    env.DB.prepare(`DELETE FROM "${tableName}" WHERE quote_id = ?`).bind(id)
-  );
-
-  if (await tableExists(env, "alimtalk_queue")) {
-    statements.push(env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id));
-  }
-
-  statements.push(env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id));
-  const deletedAt = new Date().toISOString();
-  statements.push(
-    env.DB.prepare(
-      `INSERT INTO deleted_quote_logs
-        (id, quote_id, quote_number, customer, phone, reason, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      createId("deleted-quote"),
-      quote.id,
-      quote.quote_number || "",
-      quote.customer || "",
-      quote.phone || "",
-      reason,
-      deletedAt
+  const images = await getQuoteImages(env, id);
+  const objectKeys = Array.from(
+    new Set(
+      [
+        quote.thumbnail_image_key || "",
+        ...images.map((image) => image.object_key || ""),
+      ].filter(Boolean)
     )
   );
-
-  try {
-    await env.DB.batch(statements);
-  } catch (error) {
-    console.error("고객 견적 일괄 삭제 실패", error);
-    return json({
-      ok: false,
-      message: `고객 견적 삭제 중 서버 오류가 발생했습니다. ${error?.message || ""}`.trim(),
-    }, 500);
-  }
-
-  const remaining = await env.DB.prepare("SELECT id FROM customer_quotes WHERE id = ?").bind(id).first();
-  if (remaining) {
-    return json({ ok: false, message: "서버에서 고객 견적이 완전히 삭제되지 않았습니다." }, 500);
-  }
 
   if (env.FILES) {
     for (const key of objectKeys) {
       try {
         await env.FILES.delete(key);
       } catch (error) {
-        console.warn("삭제된 견적의 R2 이미지 정리 실패", key, error);
+        // Continue deleting database records even if an object was already removed.
       }
     }
   }
 
-  return json({
-    ok: true,
-    id,
-    deletedAt,
-    deletedRelatedTables: relatedTables,
-  });
+  const deletedAt = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO deleted_quote_logs
+      (id, quote_id, quote_number, customer, phone, reason, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(createId("deleted-quote"), quote.id, quote.quote_number || "", quote.customer, quote.phone, reason, deletedAt)
+    .run();
+
+  await env.DB.prepare("DELETE FROM reviews WHERE quote_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM bids WHERE quote_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id).run();
+  await env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id).run();
+
+  return json({ ok: true, id, deletedAt });
 }
 
 async function updateCustomerQuote(env, request, id) {
@@ -1365,7 +936,7 @@ async function updateCustomerQuote(env, request, id) {
     return json({ ok: false, message: "고객명, 연락처, 품목은 필수입니다." }, 400);
   }
 
-  const updateResult = await env.DB.prepare(
+  await env.DB.prepare(
     `UPDATE customer_quotes
      SET customer = ?,
          phone = ?,
@@ -1390,17 +961,12 @@ async function updateCustomerQuote(env, request, id) {
     )
     .run();
 
-  if (Number(updateResult?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "고객 견적이 서버에서 변경되지 않았습니다. 견적 ID와 D1 연결을 확인해주세요." }, 500);
-  }
-
   const row = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
   const images = await getQuoteImages(env, id);
   return json({ ok: true, row: normalizeCustomerQuote(row, images) });
 }
 
 async function updateApprovedSeller(env, request, id) {
-  await ensureSellerTablesAndColumns(env);
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
@@ -1454,80 +1020,25 @@ async function updateApprovedSeller(env, request, id) {
     values.push(String(body.memo || "").trim());
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, "quoteAlimtalkOptOut")) {
-    updates.push("quote_alimtalk_opt_out = ?");
-    values.push(body.quoteAlimtalkOptOut ? 1 : 0);
-  }
-
   if (!updates.length) {
     return json({ ok: false, message: "변경할 정보가 없습니다." }, 400);
   }
 
   values.push(id);
-  const updateResult = await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
-  if (Number(updateResult?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "판매자 정보가 서버에서 변경되지 않았습니다." }, 500);
-  }
+  await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
   const row = normalizeApprovedSeller(
     await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first()
   );
-  if (!row) return json({ ok: false, message: "변경 후 판매자 정보를 다시 확인하지 못했습니다." }, 500);
 
   return json({ ok: true, row });
 }
 
 async function deleteApprovedSeller(env, id) {
-  await ensureSellerTablesAndColumns(env);
-  await ensureDeletedSellerTables(env);
-  const existing = await env.DB.prepare(
-    "SELECT * FROM approved_sellers WHERE id = ? OR seller_id = ? LIMIT 1"
-  ).bind(id, id).first();
+  const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
-  const sellerId = String(existing.seller_id || "").trim();
-  if (sellerId === "pickgj") {
-    return json({ ok: false, message: "마스터 판매자 계정은 삭제할 수 없습니다." }, 400);
-  }
-
-  const deletedAt = new Date().toISOString();
-  const deleteReason = "관리자 승인 판매자 계정 삭제";
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT OR REPLACE INTO deleted_seller_accounts
-        (seller_id, approved_seller_id, channel, branch, manager, deleted_at, delete_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      sellerId,
-      String(existing.id || ""),
-      String(existing.channel || ""),
-      String(existing.branch || ""),
-      String(existing.manager || ""),
-      deletedAt,
-      deleteReason
-    ),
-    env.DB.prepare("DELETE FROM approved_sellers WHERE id = ? OR seller_id = ?").bind(id, sellerId),
-    env.DB.prepare("DELETE FROM seller_applications WHERE id = ? OR seller_id = ?").bind(id, sellerId),
-  ]);
-
-  if (existing.card_image_key && env.FILES) {
-    try {
-      await env.FILES.delete(String(existing.card_image_key));
-    } catch (error) {
-      console.warn("판매자 명함 R2 삭제 실패", existing.card_image_key, error);
-    }
-  }
-
-  const remainingApproved = await env.DB.prepare(
-    "SELECT id FROM approved_sellers WHERE id = ? OR seller_id = ? LIMIT 1"
-  ).bind(id, sellerId).first();
-  const remainingApplication = await env.DB.prepare(
-    "SELECT id FROM seller_applications WHERE id = ? OR seller_id = ? LIMIT 1"
-  ).bind(id, sellerId).first();
-  if (remainingApproved || remainingApplication) {
-    return json({ ok: false, message: "판매자 계정이 서버에서 완전히 삭제되지 않았습니다." }, 500);
-  }
-
-  return json({ ok: true, id: String(existing.id || id), sellerId, deletedAt });
+  await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
+  return json({ ok: true, id });
 }
 
 async function getAlimtalk(env) {
@@ -1548,41 +1059,16 @@ async function updateAlimtalk(env, request, id) {
   const existing = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
 
-  const updateResult = await env.DB.prepare(
+  await env.DB.prepare(
     "UPDATE alimtalk_queue SET status = ?, sent_at = ?, canceled_at = ? WHERE id = ?"
   )
     .bind(body.status || "ready", body.sentAt || "", body.canceledAt || "", id)
     .run();
-  if (Number(updateResult?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "알림톡 상태가 서버에 저장되지 않았습니다." }, 500);
-  }
 
   const row = normalizeMessage(
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
   return json({ ok: true, row });
-}
-
-async function deleteAlimtalk(env, id) {
-  await ensureAlimtalkColumns(env);
-  const existing = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
-  if (!existing) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
-  const result = await env.DB.prepare("DELETE FROM alimtalk_queue WHERE id = ?").bind(id).run();
-  if (Number(result?.meta?.changes || 0) < 1) {
-    return json({ ok: false, message: "알림톡 기록이 서버에서 삭제되지 않았습니다." }, 500);
-  }
-  const remaining = await env.DB.prepare("SELECT id FROM alimtalk_queue WHERE id = ?").bind(id).first();
-  if (remaining) return json({ ok: false, message: "알림톡 삭제 후 서버 재확인에 실패했습니다." }, 500);
-  return json({ ok: true, id });
-}
-
-async function refreshAlimtalkStatus(env, id) {
-  await ensureAlimtalkColumns(env);
-  const row = normalizeMessage(
-    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
-  );
-  if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
-  return json({ ok: true, row, message: "관리자 서버의 최신 저장 상태를 확인했습니다." });
 }
 
 async function resendAlimtalk(env, id) {
@@ -1591,27 +1077,6 @@ async function resendAlimtalk(env, id) {
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
   if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
-
-  if (row.type === "seller-quote-registered") {
-    await ensureSellerTablesAndColumns(env);
-    const targetPhone = normalizePhone(row.targetPhone || "");
-    if (targetPhone) {
-      const blockedSeller = await env.DB.prepare(
-        `SELECT id FROM approved_sellers
-          WHERE status = 'approved'
-            AND COALESCE(quote_alimtalk_opt_out, 0) = 1
-            AND REPLACE(REPLACE(COALESCE(phone, ''), '-', ''), ' ', '') = ?
-          LIMIT 1`
-      ).bind(targetPhone).first();
-      if (blockedSeller) {
-        return json({
-          ok: false,
-          blocked: true,
-          message: "이 판매자는 신규 견적 알림톡 수신거부 상태라 재발송하지 않았습니다.",
-        }, 409);
-      }
-    }
-  }
 
   const templateId = row.templateId || getSolapiTemplateId(env, row.type || "notice");
   const result = await sendSolapiAlimtalk(env, row, templateId).catch((error) => ({
@@ -1665,18 +1130,10 @@ async function getFile(env, key) {
   const object = await env.FILES.get(key);
   if (!object) return new Response("Not found", { status: 404 });
 
-  const buffer = await object.arrayBuffer();
-  const contentType = detectFileContentType(
-    new Uint8Array(buffer),
-    object.httpMetadata?.contentType || "application/octet-stream"
-  );
-
-  return new Response(buffer, {
+  return new Response(object.body, {
     headers: {
-      "Content-Type": contentType,
-      "Content-Disposition": "inline",
+      "Content-Type": object.httpMetadata?.contentType || "application/octet-stream",
       "Cache-Control": "private, no-store",
-      "X-Content-Type-Options": "nosniff",
     },
   });
 }
@@ -1690,455 +1147,40 @@ async function uploadFile(env, request) {
   return json({ ok: true, key: saved.key, url: saved.url });
 }
 
-
-let siteVisitTablesReady = false;
-
-async function ensureSiteVisitTables(env) {
-  if (siteVisitTablesReady) return;
+let anonymousTablesReady = false;
+async function ensureAnonymousTables(env) {
+  if (anonymousTablesReady) return;
   await env.DB.batch([
-    env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS site_visit_daily (
-        visit_date TEXT PRIMARY KEY,
-        page_views INTEGER NOT NULL DEFAULT 0,
-        unique_visitors INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL
-      )`
-    ),
-    env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS site_visit_uniques (
-        visit_date TEXT NOT NULL,
-        visitor_hash TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (visit_date, visitor_hash)
-      )`
-    ),
-    env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS site_visit_events (
-        event_key TEXT PRIMARY KEY,
-        visit_date TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`
-    ),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS anonymous_policy_cases (id TEXT PRIMARY KEY, consultation_id TEXT NOT NULL, message_id TEXT NOT NULL, quote_id TEXT NOT NULL, bid_id TEXT NOT NULL, seller_id TEXT NOT NULL, branch TEXT DEFAULT '', detection_type TEXT NOT NULL, original_message TEXT NOT NULL, normalized_message TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'UNDER_REVIEW', follow_up_action TEXT DEFAULT '', prior_violation_count INTEGER DEFAULT 0, region_violation_count INTEGER DEFAULT 0, reviewed_at TEXT DEFAULT '', reviewed_by TEXT DEFAULT '', review_memo TEXT DEFAULT '', created_at TEXT NOT NULL)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS anonymous_seller_restrictions (seller_id TEXT PRIMARY KEY, branch_key TEXT NOT NULL, seller_status TEXT NOT NULL DEFAULT 'ACTIVE', region_status TEXT NOT NULL DEFAULT 'NORMAL', violation_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, last_case_id TEXT DEFAULT '')`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS anonymous_audit_logs (id TEXT PRIMARY KEY, event_type TEXT NOT NULL, case_id TEXT DEFAULT '', consultation_id TEXT DEFAULT '', seller_id TEXT DEFAULT '', payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`),
   ]);
-  siteVisitTablesReady = true;
+  anonymousTablesReady = true;
 }
-
-function adminTodayKey() {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+async function getAnonymousCases(env) {
+  await ensureAnonymousTables(env);
+  const rows = await env.DB.prepare('SELECT * FROM anonymous_policy_cases ORDER BY created_at DESC LIMIT 500').all();
+  return json({ ok: true, rows: rows.results || [] });
 }
-
-function adminDateKeyDaysAgo(days) {
-  const [year, month, day] = adminTodayKey().split("-").map(Number);
-  const value = new Date(Date.UTC(year, month - 1, day));
-  value.setUTCDate(value.getUTCDate() - Number(days || 0));
-  return value.toISOString().slice(0, 10);
-}
-
-async function getSiteVisitStats(env) {
-  await ensureSiteVisitTables(env);
-  const today = adminTodayKey();
-  const sevenDaysAgo = adminDateKeyDaysAgo(6);
-  const [todayRow, sevenDayRow, totalRow, dailyRows] = await Promise.all([
-    env.DB.prepare(`SELECT page_views, unique_visitors FROM site_visit_daily WHERE visit_date = ?`).bind(today).first(),
-    env.DB.prepare(
-      `SELECT COALESCE(SUM(page_views), 0) AS page_views,
-              COALESCE(SUM(unique_visitors), 0) AS unique_visitors
-         FROM site_visit_daily WHERE visit_date >= ? AND visit_date <= ?`
-    ).bind(sevenDaysAgo, today).first(),
-    env.DB.prepare(
-      `SELECT COALESCE(SUM(page_views), 0) AS page_views,
-              COALESCE(SUM(unique_visitors), 0) AS unique_visitors
-         FROM site_visit_daily`
-    ).first(),
-    env.DB.prepare(
-      `SELECT visit_date, page_views, unique_visitors FROM site_visit_daily
-       ORDER BY visit_date DESC LIMIT 14`
-    ).all(),
-  ]);
-  return json({
-    ok: true,
-    today: {
-      date: today,
-      pageViews: Number(todayRow?.page_views || 0),
-      uniqueVisitors: Number(todayRow?.unique_visitors || 0),
-    },
-    last7Days: {
-      from: sevenDaysAgo,
-      to: today,
-      pageViews: Number(sevenDayRow?.page_views || 0),
-      uniqueVisitors: Number(sevenDayRow?.unique_visitors || 0),
-    },
-    total: {
-      pageViews: Number(totalRow?.page_views || 0),
-      dailyUniqueVisitors: Number(totalRow?.unique_visitors || 0),
-    },
-    daily: (dailyRows?.results || []).map((row) => ({
-      date: row.visit_date,
-      pageViews: Number(row.page_views || 0),
-      uniqueVisitors: Number(row.unique_visitors || 0),
-    })),
-  });
-}
-
-
-let sellerAccessTablesReady = false;
-
-async function ensureSellerAccessTables(env) {
-  if (sellerAccessTablesReady) return;
-  await env.DB.batch([
-    env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS seller_access_logs (
-        id TEXT PRIMARY KEY,
-        seller_id TEXT NOT NULL,
-        access_type TEXT NOT NULL DEFAULT 'login',
-        access_date TEXT NOT NULL,
-        accessed_at TEXT NOT NULL,
-        ip_masked TEXT DEFAULT '',
-        ip_hash TEXT DEFAULT '',
-        user_agent TEXT DEFAULT '',
-        device_type TEXT DEFAULT '',
-        browser_name TEXT DEFAULT '',
-        created_at TEXT NOT NULL
-      )`
-    ),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_seller_access_logs_seller_time ON seller_access_logs(seller_id, accessed_at DESC)`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_seller_access_logs_date ON seller_access_logs(access_date, accessed_at DESC)`),
-  ]);
-  sellerAccessTablesReady = true;
-}
-
-async function getSellerAccessLogs(env, request) {
-  await ensureSellerAccessTables(env);
-  const url = new URL(request.url);
-  const limit = Math.min(500, Math.max(20, Number(url.searchParams.get('limit') || 200) || 200));
-  const sellerId = String(url.searchParams.get('sellerId') || '').trim();
-  const days = Math.min(365, Math.max(1, Number(url.searchParams.get('days') || 30) || 30));
-  const fromDate = adminDateKeyDaysAgo(days - 1);
-  const today = adminTodayKey();
-  const where = ['l.access_date >= ?'];
-  const values = [fromDate];
-  if (sellerId) {
-    where.push('l.seller_id = ?');
-    values.push(sellerId);
-  }
-  const rows = await env.DB.prepare(
-    `SELECT l.id, l.seller_id, l.access_type, l.access_date, l.accessed_at,
-            l.ip_masked, l.device_type, l.browser_name,
-            s.channel, s.branch, s.branch_region, s.manager, s.manager_position
-       FROM seller_access_logs l
-       LEFT JOIN approved_sellers s ON s.seller_id = l.seller_id
-      WHERE ${where.join(' AND ')}
-      ORDER BY l.accessed_at DESC
-      LIMIT ?`
-  ).bind(...values, limit).all();
-  const [todaySummary, weekSummary, totalSummary] = await Promise.all([
-    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs WHERE access_date = ?`).bind(today).first(),
-    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs WHERE access_date >= ? AND access_date <= ?`).bind(adminDateKeyDaysAgo(6), today).first(),
-    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs`).first(),
-  ]);
-  return json({
-    ok: true,
-    summary: {
-      today: { loginCount: Number(todaySummary?.login_count || 0), sellerCount: Number(todaySummary?.seller_count || 0) },
-      last7Days: { loginCount: Number(weekSummary?.login_count || 0), sellerCount: Number(weekSummary?.seller_count || 0) },
-      total: { loginCount: Number(totalSummary?.login_count || 0), sellerCount: Number(totalSummary?.seller_count || 0) },
-    },
-    rows: (rows.results || []).map((row) => ({
-      id: row.id,
-      sellerId: row.seller_id,
-      accessType: row.access_type,
-      accessDate: row.access_date,
-      accessedAt: row.accessed_at,
-      ipMasked: row.ip_masked || '',
-      deviceType: row.device_type || '기타',
-      browserName: row.browser_name || '기타',
-      channel: row.channel || '',
-      branch: row.branch || '',
-      branchRegion: row.branch_region || '',
-      manager: row.manager || '',
-      managerPosition: row.manager_position || '',
-    })),
-  });
-}
-
-
-let brandHallAdminTablesReady = false;
-
-async function ensureBrandHallAdminTables(env) {
-  if (brandHallAdminTablesReady) return;
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS brand_packages (
-      id TEXT PRIMARY KEY,
-      seller_id TEXT NOT NULL,
-      channel TEXT DEFAULT '',
-      branch TEXT DEFAULT '',
-      branch_region TEXT DEFAULT '',
-      manager TEXT DEFAULT '',
-      manager_phone TEXT DEFAULT '',
-      brand TEXT DEFAULT '',
-      title TEXT NOT NULL,
-      items_json TEXT DEFAULT '[]',
-      original_price INTEGER DEFAULT 0,
-      sale_price INTEGER DEFAULT 0,
-      benefits TEXT DEFAULT '',
-      cover_image TEXT DEFAULT '',
-      cover_image_key TEXT DEFAULT '',
-      status TEXT DEFAULT 'active',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`
-  ).run();
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS brand_consultations (
-      id TEXT PRIMARY KEY,
-      package_id TEXT NOT NULL,
-      seller_id TEXT NOT NULL,
-      channel TEXT DEFAULT '',
-      branch TEXT DEFAULT '',
-      manager TEXT DEFAULT '',
-      manager_phone TEXT DEFAULT '',
-      package_title TEXT DEFAULT '',
-      customer_name TEXT NOT NULL,
-      customer_phone TEXT NOT NULL,
-      customer_region TEXT DEFAULT '',
-      preferred_time TEXT DEFAULT '',
-      memo TEXT DEFAULT '',
-      consent_json TEXT DEFAULT '{}',
-      status TEXT DEFAULT 'new',
-      delivery_status TEXT DEFAULT 'pending',
-      delivery_error TEXT DEFAULT '',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`
-  ).run();
-  const migrations = [
-    "ALTER TABLE brand_consultations ADD COLUMN contract_amount INTEGER DEFAULT 0",
-    "ALTER TABLE brand_consultations ADD COLUMN commission_amount INTEGER DEFAULT 0",
-    "ALTER TABLE brand_consultations ADD COLUMN settlement_status TEXT DEFAULT 'unsettled'",
-    "ALTER TABLE brand_consultations ADD COLUMN settled_at TEXT DEFAULT ''",
-    "ALTER TABLE brand_consultations ADD COLUMN admin_memo TEXT DEFAULT ''",
-  ];
-  for (const sql of migrations) {
-    try { await env.DB.prepare(sql).run(); } catch (error) {
-      if (!String(error?.message || error || '').toLowerCase().includes('duplicate column')) console.warn('브랜드관 관리자 마이그레이션', error);
-    }
-  }
-  const indexes = [
-    "CREATE INDEX IF NOT EXISTS idx_brand_packages_status_updated ON brand_packages(status, updated_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_brand_packages_seller ON brand_packages(seller_id, updated_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_brand_consultations_created ON brand_consultations(created_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_brand_consultations_status ON brand_consultations(status, created_at DESC)",
-  ];
-  for (const sql of indexes) {
-    try { await env.DB.prepare(sql).run(); } catch (error) { console.warn('브랜드관 관리자 인덱스', error); }
-  }
-  brandHallAdminTablesReady = true;
-}
-
-function normalizeBrandHallPublicChannel(value) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  const compact = text.replace(/\s+/g, '').toLowerCase();
-  if (compact.includes('전자랜드')) return '전자랜드';
-  if (compact.includes('하이마트')) return '하이마트';
-  if (compact.includes('삼성스토어') || compact.includes('samsungstore')) return '삼성스토어';
-  if (compact.includes('lg전자bestshop') || compact.includes('lgbestshop') || compact.includes('lg베스트샵') || compact.includes('베스트샵')) return 'LG전자 BEST SHOP';
-  return '';
-}
-
-function normalizeBrandHallPackageAdmin(row) {
-  if (!row) return null;
-  return {
-    id: row.id || '',
-    sellerId: row.seller_id || '',
-    publicChannel: normalizeBrandHallPublicChannel(row.channel),
-    channel: row.channel || '',
-    branch: row.branch || '',
-    branchRegion: row.branch_region || '',
-    manager: row.manager || '',
-    managerPhone: normalizePhone(row.manager_phone || ''),
-    brand: row.brand || '',
-    title: row.title || '',
-    items: parseJson(row.items_json, []),
-    originalPrice: Number(row.original_price || 0),
-    salePrice: Number(row.sale_price || 0),
-    benefits: row.benefits || '',
-    coverImage: row.cover_image || '',
-    coverImageKey: row.cover_image_key || '',
-    status: row.status || 'active',
-    createdAt: row.created_at || '',
-    updatedAt: row.updated_at || '',
-  };
-}
-
-function normalizeBrandHallConsultationAdmin(row) {
-  if (!row) return null;
-  return {
-    id: row.id || '',
-    packageId: row.package_id || '',
-    sellerId: row.seller_id || '',
-    publicChannel: normalizeBrandHallPublicChannel(row.channel),
-    channel: row.channel || '',
-    branch: row.branch || '',
-    manager: row.manager || '',
-    managerPhone: normalizePhone(row.manager_phone || ''),
-    packageTitle: row.package_title || '',
-    customerName: row.customer_name || '',
-    customerPhone: normalizePhone(row.customer_phone || ''),
-    customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''),
-    customerRegion: row.customer_region || '',
-    preferredTime: row.preferred_time || '',
-    memo: row.memo || '',
-    status: row.status || 'new',
-    deliveryStatus: row.delivery_status || '',
-    deliveryError: row.delivery_error || '',
-    contractAmount: Number(row.contract_amount || 0),
-    commissionAmount: Number(row.commission_amount || 0),
-    settlementStatus: row.settlement_status || 'unsettled',
-    settledAt: row.settled_at || '',
-    adminMemo: row.admin_memo || '',
-    createdAt: row.created_at || '',
-    updatedAt: row.updated_at || '',
-  };
-}
-
-async function getBrandHallAdmin(env) {
-  await ensureBrandHallAdminTables(env);
-  const [packages, consultations] = await Promise.all([
-    env.DB.prepare('SELECT * FROM brand_packages ORDER BY updated_at DESC LIMIT 500').all(),
-    env.DB.prepare('SELECT * FROM brand_consultations ORDER BY created_at DESC LIMIT 1000').all(),
-  ]);
-  return json({
-    ok: true,
-    packages: (packages.results || []).map(normalizeBrandHallPackageAdmin),
-    consultations: (consultations.results || []).map(normalizeBrandHallConsultationAdmin),
-  });
-}
-
-async function getApprovedSellerForBrandHall(env, sellerId) {
-  const row = await env.DB.prepare("SELECT * FROM approved_sellers WHERE seller_id = ? AND status = 'approved' LIMIT 1")
-    .bind(String(sellerId || '').trim()).first();
-  if (!row) return null;
-  if (!normalizeBrandHallPublicChannel(row.channel)) return null;
-  return row;
-}
-
-async function saveBrandHallPackageAdmin(env, request, packageId = '') {
-  await ensureBrandHallAdminTables(env);
+async function reviewAnonymousCase(env, request, caseId) {
+  await ensureAnonymousTables(env);
   const body = await request.json().catch(() => ({}));
-  const payload = body.package || body || {};
-  const id = String(packageId || payload.id || '').trim() || createId('brandpkg');
-  const sellerId = String(payload.sellerId || '').trim();
-  const seller = await getApprovedSellerForBrandHall(env, sellerId);
-  if (!seller) return json({ ok: false, message: '브랜드관에 사용할 승인 판매자를 선택해주세요. 지정된 4개 채널만 등록할 수 있습니다.' }, 400);
-
-  const title = String(payload.title || '').trim().slice(0, 80);
-  const brand = String(payload.brand || '').trim().slice(0, 40);
-  const items = Array.isArray(payload.items)
-    ? payload.items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 20)
-    : String(payload.items || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 20);
-  const originalPrice = Math.max(0, Math.floor(Number(payload.originalPrice || 0)));
-  const salePrice = Math.max(0, Math.floor(Number(payload.salePrice || 0)));
-  const benefits = String(payload.benefits || '').trim().slice(0, 1000);
-  const status = String(payload.status || 'active') === 'hidden' ? 'hidden' : 'active';
-  if (!title || !brand || !items.length || !salePrice) return json({ ok: false, message: '브랜드, 패키지명, 제품 구성, 판매 금액은 필수입니다.' }, 400);
-
-  const existing = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
-  let coverImage = existing?.cover_image || '';
-  let coverImageKey = existing?.cover_image_key || '';
-  const coverDataUrl = String(payload.coverImageDataUrl || '');
-  if (coverDataUrl) {
-    const info = dataUrlInfo(coverDataUrl);
-    if (!info || !isBrowserSafeQuoteImageType(info.contentType)) return json({ ok: false, message: '대표 이미지는 JPG, PNG 또는 WebP만 등록할 수 있습니다.' }, 415);
-    if (!env.FILES) return json({ ok: false, message: 'R2 파일 저장소가 연결되지 않았습니다.' }, 500);
-    const saved = await saveDataUrlToR2(env, coverDataUrl, 'brand-packages', `${id}-cover-${Date.now()}`);
-    if (!saved.key) return json({ ok: false, message: '대표 이미지를 저장하지 못했습니다.' }, 500);
-    const oldKey = coverImageKey;
-    coverImage = saved.url || '';
-    coverImageKey = saved.key || '';
-    if (oldKey && oldKey !== coverImageKey) {
-      try { await env.FILES.delete(oldKey); } catch (error) { console.warn('이전 브랜드관 이미지 삭제 실패', error); }
-    }
+  const decision = String(body.decision || '').toUpperCase();
+  if (!['NOT_VIOLATION', 'ADDITIONAL_REVIEW', 'APPROVED'].includes(decision)) return json({ ok: false, message: '판정값이 올바르지 않습니다.' }, 400);
+  const item = await env.DB.prepare('SELECT * FROM anonymous_policy_cases WHERE id = ? LIMIT 1').bind(caseId).first();
+  if (!item) return json({ ok: false, message: '판정 사례를 찾을 수 없습니다.' }, 404);
+  const now = new Date().toISOString(); let action = decision;
+  if (decision === 'APPROVED') {
+    const prior = await env.DB.prepare('SELECT * FROM anonymous_seller_restrictions WHERE seller_id = ? LIMIT 1').bind(item.seller_id).first();
+    const count = Number(prior?.violation_count || 0) + 1;
+    const sellerStatus = count >= 2 ? 'PERMANENTLY_BANNED' : 'TEMP_RESTRICTED';
+    const regionStatus = count >= 2 ? 'PERMANENTLY_BANNED' : 'NEW_SIGNUP_BLOCKED';
+    await env.DB.prepare(`INSERT INTO anonymous_seller_restrictions (seller_id, branch_key, seller_status, region_status, violation_count, updated_at, last_case_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(seller_id) DO UPDATE SET seller_status = excluded.seller_status, region_status = excluded.region_status, violation_count = excluded.violation_count, updated_at = excluded.updated_at, last_case_id = excluded.last_case_id`).bind(item.seller_id, item.branch || '', sellerStatus, regionStatus, count, now, caseId).run();
+    action = count >= 2 ? 'PERMANENTLY_BANNED' : 'NEW_SIGNUP_BLOCKED';
   }
-
-  const now = new Date().toISOString();
-  const snapshot = {
-    channel: seller.channel || '', branch: seller.branch || '', branchRegion: seller.branch_region || '',
-    manager: seller.manager || '', managerPhone: normalizePhone(seller.phone || ''),
-  };
-  if (!existing) {
-    await env.DB.prepare(
-      `INSERT INTO brand_packages
-       (id, seller_id, channel, branch, branch_region, manager, manager_phone, brand, title, items_json,
-        original_price, sale_price, benefits, cover_image, cover_image_key, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, sellerId, snapshot.channel, snapshot.branch, snapshot.branchRegion, snapshot.manager, snapshot.managerPhone,
-      brand, title, JSON.stringify(items), originalPrice, salePrice, benefits, coverImage, coverImageKey, status, now, now).run();
-  } else {
-    await env.DB.prepare(
-      `UPDATE brand_packages SET seller_id = ?, channel = ?, branch = ?, branch_region = ?, manager = ?, manager_phone = ?,
-       brand = ?, title = ?, items_json = ?, original_price = ?, sale_price = ?, benefits = ?, cover_image = ?, cover_image_key = ?,
-       status = ?, updated_at = ? WHERE id = ?`
-    ).bind(sellerId, snapshot.channel, snapshot.branch, snapshot.branchRegion, snapshot.manager, snapshot.managerPhone,
-      brand, title, JSON.stringify(items), originalPrice, salePrice, benefits, coverImage, coverImageKey, status, now, id).run();
-  }
-  const savedRow = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
-  if (!savedRow) return json({ ok: false, message: '패키지 서버 저장 여부를 확인하지 못했습니다.' }, 500);
-  return json({ ok: true, row: normalizeBrandHallPackageAdmin(savedRow) });
-}
-
-async function deleteBrandHallPackageAdmin(env, packageId) {
-  await ensureBrandHallAdminTables(env);
-  const id = String(packageId || '').trim();
-  const row = await env.DB.prepare('SELECT * FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
-  if (!row) return json({ ok: false, message: '삭제할 브랜드관 패키지를 찾을 수 없습니다.' }, 404);
-  await env.DB.prepare('DELETE FROM brand_packages WHERE id = ?').bind(id).run();
-  if (row.cover_image_key && env.FILES) {
-    try { await env.FILES.delete(row.cover_image_key); } catch (error) { console.warn('브랜드관 이미지 삭제 실패', error); }
-  }
-  const verify = await env.DB.prepare('SELECT id FROM brand_packages WHERE id = ? LIMIT 1').bind(id).first();
-  if (verify?.id) return json({ ok: false, message: '브랜드관 패키지가 서버에서 삭제되지 않았습니다.' }, 500);
-  return json({ ok: true, deletedId: id });
-}
-
-async function updateBrandHallConsultationAdmin(env, request, consultationId) {
-  await ensureBrandHallAdminTables(env);
-  const id = String(consultationId || '').trim();
-  const body = await request.json().catch(() => ({}));
-  const existing = await env.DB.prepare('SELECT * FROM brand_consultations WHERE id = ? LIMIT 1').bind(id).first();
-  if (!existing) return json({ ok: false, message: '상담 신청 내역을 찾을 수 없습니다.' }, 404);
-  const allowedStatus = new Set(['new', 'contacted', 'negotiating', 'contracted', 'cancelled']);
-  const allowedSettlement = new Set(['unsettled', 'pending', 'settled', 'waived']);
-  const status = allowedStatus.has(String(body.status || '')) ? String(body.status) : (existing.status || 'new');
-  const settlementStatus = allowedSettlement.has(String(body.settlementStatus || '')) ? String(body.settlementStatus) : (existing.settlement_status || 'unsettled');
-  const contractAmount = Math.max(0, Math.floor(Number(body.contractAmount ?? existing.contract_amount ?? 0)));
-  const commissionAmount = Math.max(0, Math.floor(Number(body.commissionAmount ?? existing.commission_amount ?? 0)));
-  const adminMemo = String(body.adminMemo ?? existing.admin_memo ?? '').trim().slice(0, 1200);
-  let settledAt = String(existing.settled_at || '');
-  if (settlementStatus === 'settled' && !settledAt) settledAt = new Date().toISOString();
-  if (settlementStatus !== 'settled') settledAt = '';
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    `UPDATE brand_consultations SET status = ?, contract_amount = ?, commission_amount = ?, settlement_status = ?, settled_at = ?, admin_memo = ?, updated_at = ? WHERE id = ?`
-  ).bind(status, contractAmount, commissionAmount, settlementStatus, settledAt, adminMemo, now, id).run();
-  const row = await env.DB.prepare('SELECT * FROM brand_consultations WHERE id = ? LIMIT 1').bind(id).first();
-  return json({ ok: true, row: normalizeBrandHallConsultationAdmin(row) });
-}
-
-function getAdminAuthStatus(env) {
-  const tokenEntries = getAdminTokenEntries(env);
-  return json({
-    ok: true,
-    authenticated: true,
-    hasRuntimeToken: tokenEntries.length > 0,
-    tokenSource: tokenEntries[0]?.name || "missing",
-    hasDb: Boolean(env.DB),
-    hasFiles: Boolean(env.FILES),
-  });
+  await env.DB.prepare('UPDATE anonymous_policy_cases SET status = ?, follow_up_action = ?, reviewed_at = ?, reviewed_by = ?, review_memo = ? WHERE id = ?').bind(decision, action, now, 'admin', String(body.memo || '').slice(0, 1000), caseId).run();
+  await env.DB.prepare(`INSERT INTO anonymous_audit_logs (id, event_type, case_id, consultation_id, seller_id, payload_json, created_at) VALUES (?, 'CASE_REVIEWED', ?, ?, ?, ?, ?)`).bind(createId('anon-audit'), caseId, item.consultation_id, item.seller_id, JSON.stringify({ decision, action }), now).run();
+  return json({ ok: true, decision, action });
 }
 
 export async function onRequest(context) {
@@ -2155,10 +1197,6 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
-  if (path === "auth-status" && method === "GET") return getAdminAuthStatus(env);
-
-  if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);
-  if (path === "seller-access-logs" && method === "GET") return getSellerAccessLogs(env, request);
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
@@ -2166,14 +1204,10 @@ export async function onRequest(context) {
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
-  if (path.startsWith("bids/") && method === "DELETE") {
-    return deleteBidAdmin(env, decodeURIComponent(pathParts.slice(1).join("/")));
-  }
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
-  if (path.startsWith("customer-quotes/") && path.endsWith("/images") && method === "POST") {
-    return replaceCustomerQuoteImages(env, request, decodeURIComponent(pathParts.slice(1, -1).join("/")));
-  }
+  if (path === "anonymous-policy-cases" && method === "GET") return getAnonymousCases(env);
+  if (path.startsWith("anonymous-policy-cases/") && method === "PATCH") return reviewAnonymousCase(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   if (path.startsWith("customer-quotes/") && method === "PATCH") {
     return updateCustomerQuote(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
@@ -2187,22 +1221,10 @@ export async function onRequest(context) {
     return deleteApprovedSeller(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }
 
-  if (path === "brand-hall" && method === "GET") return getBrandHallAdmin(env);
-  if (path === "brand-hall/packages" && method === "POST") return saveBrandHallPackageAdmin(env, request);
-  if (path.startsWith("brand-hall/packages/") && method === "PATCH") return saveBrandHallPackageAdmin(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
-  if (path.startsWith("brand-hall/packages/") && method === "DELETE") return deleteBrandHallPackageAdmin(env, decodeURIComponent(pathParts.slice(2).join("/")));
-  if (path.startsWith("brand-hall/consultations/") && method === "PATCH") return updateBrandHallConsultationAdmin(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
-
   if (path === "alimtalk" && method === "GET") return getAlimtalk(env);
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);
   if (path.startsWith("alimtalk/") && path.endsWith("/resend") && method === "POST") {
     return resendAlimtalk(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
-  }
-  if (path.startsWith("alimtalk/") && path.endsWith("/refresh") && method === "POST") {
-    return refreshAlimtalkStatus(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
-  }
-  if (path.startsWith("alimtalk/") && method === "DELETE") {
-    return deleteAlimtalk(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }
   if (path.startsWith("alimtalk/") && method === "PATCH") {
     return updateAlimtalk(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
