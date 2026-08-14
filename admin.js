@@ -29,6 +29,7 @@ let lplanSyncError = "";
 let lplanSyncing = false;
 let lplanLastCheckedAt = "";
 let adminQuoteCountdownTimer = 0;
+let visitStatsRefreshTimer = 0;
 let adminQuoteSummaryKey = "";
 let customerQuoteSearchTerm = "";
 const SELLER_CHANNELS = [
@@ -582,6 +583,13 @@ async function loadVisitStatsFromServer(options = {}) {
   const timestamp = Date.now();
   const requestOptions = options.silent ? { silent: true } : {};
   return apiJson(`/api/visit-stats?ts=${timestamp}`, requestOptions);
+}
+
+async function refreshVisitStatsOnly() {
+  const result = await loadVisitStatsFromServer({ silent: true });
+  if (!result?.ok) return;
+  localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(result));
+  renderStats();
 }
 
 async function loadSellerAccessLogsFromServer(options = {}) {
@@ -2736,6 +2744,7 @@ if (initialApplicationIdFromUrl) {
 
 updateLastRefreshedDisplay();
 renderAll();
+visitStatsRefreshTimer = window.setInterval(refreshVisitStatsOnly, 5 * 60 * 1000);
 showToast("서버 데이터는 상단 새로고침 버튼을 눌렀을 때만 불러옵니다.");
 
 
