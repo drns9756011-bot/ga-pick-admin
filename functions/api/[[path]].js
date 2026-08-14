@@ -64,6 +64,124 @@ async function getSiteVisitStats(env) {
   return json({ ok: true, today: { date: today, pageViews: Number(todayRow?.page_views || 0), uniqueVisitors: Number(todayRow?.unique_visitors || 0) }, last7Days: { from: sevenDaysAgo, to: today, pageViews: Number(sevenDayRow?.page_views || 0), uniqueVisitors: Number(sevenDayRow?.unique_visitors || 0) }, total: { pageViews: Number(totalRow?.page_views || 0), dailyUniqueVisitors: Number(totalRow?.unique_visitors || 0) }, daily: (dailyRows?.results || []).map((row) => ({ date: row.visit_date, pageViews: Number(row.page_views || 0), uniqueVisitors: Number(row.unique_visitors || 0) })) });
 }
 
+let brandAdminTablesReady = false;
+async function ensureBrandAdminTables(env) {
+  if (brandAdminTablesReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS brand_packages (id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, channel TEXT DEFAULT '', branch TEXT DEFAULT '', branch_region TEXT DEFAULT '', manager TEXT DEFAULT '', manager_phone TEXT DEFAULT '', brand TEXT DEFAULT '', title TEXT NOT NULL, items_json TEXT DEFAULT '[]', original_price INTEGER DEFAULT 0, sale_price INTEGER DEFAULT 0, benefits TEXT DEFAULT '', cover_image TEXT DEFAULT '', cover_image_key TEXT DEFAULT '', status TEXT DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS brand_consultations (id TEXT PRIMARY KEY, package_id TEXT NOT NULL, seller_id TEXT NOT NULL, channel TEXT DEFAULT '', branch TEXT DEFAULT '', manager TEXT DEFAULT '', manager_phone TEXT DEFAULT '', package_title TEXT DEFAULT '', customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, customer_region TEXT DEFAULT '', preferred_time TEXT DEFAULT '', memo TEXT DEFAULT '', consent_json TEXT DEFAULT '{}', status TEXT DEFAULT 'new', delivery_status TEXT DEFAULT 'pending', delivery_error TEXT DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+  ]);
+  await Promise.all([
+    env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN contract_amount INTEGER DEFAULT 0").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN commission_amount INTEGER DEFAULT 0").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN settlement_status TEXT DEFAULT 'unsettled'").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN admin_memo TEXT DEFAULT ''").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN settled_at TEXT DEFAULT ''").run().catch(() => {}),
+  ]);
+  brandAdminTablesReady = true;
+}
+
+function normalizeAdminBrandPackage(row) {
+  return { id: row.id, sellerId: row.seller_id || '', channel: row.channel || '', publicChannel: row.channel || '', branch: row.branch || '', branchRegion: row.branch_region || '', manager: row.manager || '', managerPhone: row.manager_phone || '', brand: row.brand || '', title: row.title || '', items: parseJson(row.items_json, []), originalPrice: Number(row.original_price || 0), salePrice: Number(row.sale_price || 0), benefits: row.benefits || '', coverImage: row.cover_image || '', coverImageKey: row.cover_image_key || '', status: row.status || 'active', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
+}
+
+function normalizeAdminBrandConsultation(row) {
+  return { id: row.id, packageId: row.package_id || '', sellerId: row.seller_id || '', channel: row.channel || '', branch: row.branch || '', manager: row.manager || '', managerPhone: row.manager_phone || '', packageTitle: row.package_title || '', customerName: row.customer_name || '', customerPhone: normalizePhone(row.customer_phone || ''), customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''), customerRegion: row.customer_region || '', preferredTime: row.preferred_time || '', memo: row.memo || '', status: row.status || 'new', deliveryStatus: row.delivery_status || 'pending', deliveryError: row.delivery_error || '', contractAmount: Number(row.contract_amount || 0), commissionAmount: Number(row.commission_amount || 0), settlementStatus: row.settlement_status || 'unsettled', adminMemo: row.admin_memo || '', settledAt: row.settled_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
+}
+
+async function getAdminBrandHall(env) {
+  await ensureBrandAdminTables(env);
+  const [packages, consultations] = await Promise.all([
+    env.DB.prepare("SELECT * FROM brand_packages ORDER BY updated_at DESC LIMIT 300").all(),
+    env.DB.prepare("SELECT * FROM brand_consultations ORDER BY created_at DESC LIMIT 500").all(),
+  ]);
+  return json({ ok: true, packages: (packages.results || []).map(normalizeAdminBrandPackage), consultations: (consultations.results || []).map(normalizeAdminBrandConsultation) });
+}
+
+async function saveAdminBrandPackage(env, request, id = '') {
+  await ensureBrandAdminTables(env);
+  const body = await request.json().catch(() => ({}));
+  const payload = body.package || {};
+  const sellerId = String(payload.sellerId || '').trim();
+  const title = String(payload.title || '').trim().slice(0, 80);
+  const brand = String(payload.brand || '').trim().slice(0, 40);
+  const items = Array.isArray(payload.items) ? payload.items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 20) : [];
+  const originalPrice = Math.max(0, Math.floor(Number(payload.originalPrice || 0)));
+  const salePrice = Math.max(0, Math.floor(Number(payload.salePrice || 0)));
+  if (!sellerId || !title || !brand || !items.length || !salePrice) return json({ ok: false, message: '판매자, 브랜드, 패키지명, 제품 구성, 판매가는 필수입니다.' }, 400);
+  const seller = await env.DB.prepare("SELECT * FROM approved_sellers WHERE seller_id = ? AND status = 'approved' LIMIT 1").bind(sellerId).first();
+  if (!seller) return json({ ok: false, message: '승인된 판매자 계정을 찾을 수 없습니다.' }, 404);
+  const now = new Date().toISOString();
+  const packageId = String(id || createId('brandpkg'));
+  const existing = id ? await env.DB.prepare("SELECT * FROM brand_packages WHERE id = ? LIMIT 1").bind(packageId).first() : null;
+  if (id && !existing) return json({ ok: false, message: '수정할 브랜드관 패키지를 찾을 수 없습니다.' }, 404);
+  let coverImage = existing?.cover_image || '';
+  let coverImageKey = existing?.cover_image_key || '';
+  const coverDataUrl = String(payload.coverImageDataUrl || '');
+  if (coverDataUrl) {
+    if (!env.FILES) return json({ ok: false, message: '대표 이미지 저장소가 연결되지 않았습니다.' }, 500);
+    const saved = await saveDataUrlToR2(env, coverDataUrl, 'brand-packages', `${packageId}-cover-${Date.now()}`);
+    if (!saved.key) return json({ ok: false, message: '대표 이미지 저장에 실패했습니다.' }, 500);
+    coverImage = saved.url || '';
+    coverImageKey = saved.key || '';
+    if (existing?.cover_image_key && existing.cover_image_key !== coverImageKey) await env.FILES.delete(existing.cover_image_key).catch(() => {});
+  }
+  const values = [sellerId, seller.channel || '', seller.branch || '', seller.branch_region || '', seller.manager || '', normalizePhone(seller.phone || ''), brand, title, JSON.stringify(items), originalPrice, salePrice, String(payload.benefits || '').trim().slice(0, 1200), coverImage, coverImageKey, payload.status === 'hidden' ? 'hidden' : 'active', now];
+  if (existing) {
+    await env.DB.prepare("UPDATE brand_packages SET seller_id = ?, channel = ?, branch = ?, branch_region = ?, manager = ?, manager_phone = ?, brand = ?, title = ?, items_json = ?, original_price = ?, sale_price = ?, benefits = ?, cover_image = ?, cover_image_key = ?, status = ?, updated_at = ? WHERE id = ?").bind(...values, packageId).run();
+  } else {
+    await env.DB.prepare("INSERT INTO brand_packages (id, seller_id, channel, branch, branch_region, manager, manager_phone, brand, title, items_json, original_price, sale_price, benefits, cover_image, cover_image_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(packageId, ...values.slice(0, 15), now, now).run();
+  }
+  const savedRow = await env.DB.prepare("SELECT * FROM brand_packages WHERE id = ? LIMIT 1").bind(packageId).first();
+  return json({ ok: true, row: normalizeAdminBrandPackage(savedRow) });
+}
+
+async function deleteAdminBrandPackage(env, id) {
+  await ensureBrandAdminTables(env);
+  const row = await env.DB.prepare("SELECT * FROM brand_packages WHERE id = ? LIMIT 1").bind(id).first();
+  if (!row) return json({ ok: false, message: '삭제할 브랜드관 패키지를 찾을 수 없습니다.' }, 404);
+  await env.DB.prepare("DELETE FROM brand_packages WHERE id = ?").bind(id).run();
+  if (row.cover_image_key && env.FILES) await env.FILES.delete(row.cover_image_key).catch(() => {});
+  return json({ ok: true, deletedId: id });
+}
+
+async function updateAdminBrandConsultation(env, request, id) {
+  await ensureBrandAdminTables(env);
+  const body = await request.json().catch(() => ({}));
+  const existing = await env.DB.prepare("SELECT * FROM brand_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  if (!existing) return json({ ok: false, message: '브랜드관 상담을 찾을 수 없습니다.' }, 404);
+  const status = ['new', 'contacted', 'negotiating', 'contracted', 'cancelled'].includes(String(body.status)) ? String(body.status) : existing.status || 'new';
+  const settlementStatus = ['unsettled', 'pending', 'settled', 'waived'].includes(String(body.settlementStatus)) ? String(body.settlementStatus) : existing.settlement_status || 'unsettled';
+  const settledAt = settlementStatus === 'settled' ? (existing.settled_at || new Date().toISOString()) : '';
+  await env.DB.prepare("UPDATE brand_consultations SET status = ?, contract_amount = ?, commission_amount = ?, settlement_status = ?, admin_memo = ?, settled_at = ?, updated_at = ? WHERE id = ?").bind(status, Math.max(0, Number(body.contractAmount || 0)), Math.max(0, Number(body.commissionAmount || 0)), settlementStatus, String(body.adminMemo || '').slice(0, 1200), settledAt, new Date().toISOString(), id).run();
+  const row = await env.DB.prepare("SELECT * FROM brand_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  return json({ ok: true, row: normalizeAdminBrandConsultation(row) });
+}
+
+let adminChatTablesReady = false;
+async function ensureAdminChatTables(env) {
+  if (adminChatTablesReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS anonymous_consultations (id TEXT PRIMARY KEY, quote_id TEXT NOT NULL, bid_id TEXT NOT NULL, seller_id TEXT NOT NULL, started_by TEXT NOT NULL DEFAULT 'customer', status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, selected_at TEXT DEFAULT '')`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS anonymous_consultation_messages (id TEXT PRIMARY KEY, consultation_id TEXT NOT NULL, sender_role TEXT NOT NULL, sender_id TEXT DEFAULT '', body TEXT NOT NULL, normalized_body TEXT NOT NULL, blocked INTEGER NOT NULL DEFAULT 0, block_reason TEXT DEFAULT '', created_at TEXT NOT NULL)`),
+  ]);
+  adminChatTablesReady = true;
+}
+
+async function getAdminAnonymousConsultations(env, request) {
+  await ensureAdminChatTables(env);
+  const url = new URL(request.url);
+  const id = String(url.searchParams.get('id') || '').trim();
+  if (id) {
+    const consultation = await env.DB.prepare('SELECT * FROM anonymous_consultations WHERE id = ? LIMIT 1').bind(id).first();
+    if (!consultation) return json({ ok: false, message: '채팅방을 찾을 수 없습니다.' }, 404);
+    const messages = await env.DB.prepare('SELECT id, sender_role, sender_id, body, blocked, block_reason, created_at FROM anonymous_consultation_messages WHERE consultation_id = ? ORDER BY created_at ASC').bind(id).all();
+    return json({ ok: true, consultation, messages: messages.results || [] });
+  }
+  const rooms = await env.DB.prepare(`SELECT c.*, q.quote_number, q.customer, q.phone, b.price, (SELECT COUNT(*) FROM anonymous_consultation_messages m WHERE m.consultation_id = c.id) AS message_count, (SELECT body FROM anonymous_consultation_messages m WHERE m.consultation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message FROM anonymous_consultations c LEFT JOIN customer_quotes q ON q.id = c.quote_id LEFT JOIN bids b ON b.id = c.bid_id ORDER BY c.updated_at DESC LIMIT 300`).all();
+  return json({ ok: true, rooms: rooms.results || [] });
+}
+
 function getAdminToken(env) {
   return String(env.ADMIN_API_TOKEN || "").trim();
 }
@@ -1267,6 +1385,12 @@ export async function onRequest(context) {
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
   if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);
+  if (path === "brand-hall" && method === "GET") return getAdminBrandHall(env);
+  if (path === "brand-hall/packages" && method === "POST") return saveAdminBrandPackage(env, request);
+  if (path.startsWith("brand-hall/packages/") && method === "PATCH") return saveAdminBrandPackage(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/packages/") && method === "DELETE") return deleteAdminBrandPackage(env, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/consultations/") && method === "PATCH") return updateAdminBrandConsultation(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path === "anonymous-consultations" && method === "GET") return getAdminAnonymousConsultations(env, request);
   if (path === "anonymous-policy-cases" && method === "GET") return getAnonymousCases(env);
   if (path.startsWith("anonymous-policy-cases/") && method === "PATCH") return reviewAnonymousCase(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   if (path.startsWith("customer-quotes/") && method === "PATCH") {

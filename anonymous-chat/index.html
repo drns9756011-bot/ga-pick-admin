@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>익명상담 채팅 관리</title>
+  <link rel="stylesheet" href="/admin.css?v=20260814-admin-review-fix" />
+  <style>
+    .chat-admin-wrap { max-width: 1440px; margin: 0 auto; padding: 28px; }
+    .chat-admin-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 18px; }
+    .chat-admin-list, .chat-admin-room { background: #fff; border: 1px solid #d9e2eb; border-radius: 10px; overflow: hidden; }
+    .chat-room-button { display: block; width: 100%; padding: 15px; border: 0; border-bottom: 1px solid #edf1f5; background: #fff; text-align: left; cursor: pointer; color: #14283c; }
+    .chat-room-button.is-active { background: #edf4fb; }
+    .chat-room-button strong, .chat-room-button small { display: block; }
+    .chat-room-button small { margin-top: 5px; color: #637487; }
+    .chat-room-head { padding: 18px 20px; border-bottom: 1px solid #e5ebf0; }
+    .chat-messages { min-height: 430px; max-height: 620px; overflow: auto; padding: 20px; background: #f5f8fb; }
+    .chat-message { max-width: 72%; margin: 0 0 12px; padding: 11px 13px; border-radius: 10px; background: #fff; border: 1px solid #dbe4ec; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .chat-message.seller { margin-left: auto; background: #eaf2fb; border-color: #c5d9ec; }
+    .chat-message small { display: block; margin-bottom: 5px; color: #687b8e; font-size: 11px; }
+    @media (max-width: 760px) { .chat-admin-grid { grid-template-columns: 1fr; } .chat-messages { min-height: 360px; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="픽견적 관리자 홈"><span class="brand-mark">P</span><span>픽견적<small>관리자 콘솔</small></span></a>
+    <nav class="side-nav" aria-label="관리자 메뉴"><span class="nav-label">운영 메뉴</span><a href="/">관리 현황</a><a href="/customers">고객 견적</a><a href="/sellers">판매자 신청</a><a href="/approved-sellers">승인 판매자</a><a href="/brand-hall">브랜드관 관리</a><a class="is-active" href="/anonymous-chat">채팅 관리</a><a href="/anonymous-consultation">익명상담 판정</a><a href="/alimtalk">알림톡 상태</a></nav>
+  </aside>
+  <main class="admin-shell"><div class="chat-admin-wrap">
+    <header class="admin-header"><div><p class="eyebrow">Anonymous Chat</p><h1>익명상담 채팅 관리</h1><p class="header-copy">고객과 판매자의 익명상담 채팅방과 메시지를 서버에서 확인합니다.</p></div><button class="primary-btn" id="refresh" type="button">새로고침</button></header>
+    <div class="chat-admin-grid"><section class="chat-admin-list" id="rooms"><p style="padding:20px">관리자 토큰을 입력하고 불러오세요.</p></section><section class="chat-admin-room" id="room"><div class="chat-room-head">채팅방을 선택하세요.</div><div class="chat-messages"></div></section></div>
+  </div></main>
+  <script>
+    const token = localStorage.getItem('pickquoteAdminApiToken') || window.prompt('관리자 API 토큰');
+    if (token) localStorage.setItem('pickquoteAdminApiToken', token);
+    const rooms = document.querySelector('#rooms'), room = document.querySelector('#room'); let rows = [];
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    async function loadRooms() { const r = await fetch('/api/anonymous-consultations', { headers: {'X-Admin-Token': token || ''}, cache: 'no-store' }); const d = await r.json().catch(() => ({})); if (!d.ok) { rooms.innerHTML = `<p style="padding:20px">${esc(d.message || '채팅방을 불러오지 못했습니다.')}</p>`; return; } rows = d.rooms || []; rooms.innerHTML = rows.length ? rows.map((x) => `<button class="chat-room-button" data-room="${esc(x.id)}"><strong>${esc(x.customer || '고객')} · ${esc(x.quote_number || '-')}</strong><small>${esc(x.last_message || '메시지 없음')} · ${esc(x.message_count || 0)}건</small></button>`).join('') : '<p style="padding:20px">채팅방이 없습니다.</p>'; }
+    async function openRoom(id, button) { document.querySelectorAll('.chat-room-button').forEach((x) => x.classList.remove('is-active')); button.classList.add('is-active'); const r = await fetch(`/api/anonymous-consultations?id=${encodeURIComponent(id)}`, { headers: {'X-Admin-Token': token || ''}, cache: 'no-store' }); const d = await r.json().catch(() => ({})); if (!d.ok) return; room.querySelector('.chat-room-head').innerHTML = `<strong>${esc(d.consultation.customer || '고객')} · ${esc(d.consultation.quote_id)}</strong><br><small>판매자 ${esc(d.consultation.seller_id)} · 상태 ${esc(d.consultation.status)}</small>`; room.querySelector('.chat-messages').innerHTML = (d.messages || []).map((x) => `<div class="chat-message ${x.sender_role === 'seller' ? 'seller' : ''}"><small>${x.sender_role === 'seller' ? '판매자' : '고객'} · ${esc(x.created_at)}</small>${esc(Number(x.blocked) ? '개인정보 보호 정책에 의해 차단된 메시지' : x.body)}</div>`).join('') || '<p>메시지가 없습니다.</p>'; }
+    rooms.addEventListener('click', (e) => { const b = e.target.closest('[data-room]'); if (b) openRoom(b.dataset.room, b); }); document.querySelector('#refresh').addEventListener('click', loadRooms); loadRooms();
+  </script>
+</body>
+</html>
