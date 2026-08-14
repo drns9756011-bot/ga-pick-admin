@@ -955,6 +955,34 @@ async function deleteCustomerQuote(env, request, id) {
   return json({ ok: true, id, deletedAt });
 }
 
+async function deleteManagerBid(env, id) {
+  const bid = await env.DB.prepare("SELECT * FROM bids WHERE id = ? LIMIT 1").bind(id).first();
+  if (!bid) return json({ ok: false, message: "삭제할 판매자 제안을 찾을 수 없습니다." }, 404);
+
+  const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(bid.quote_id).first();
+  if (!quote) return json({ ok: false, message: "제안과 연결된 고객 견적을 찾을 수 없습니다." }, 404);
+
+  let releasedBidIds = [];
+  try {
+    const parsed = JSON.parse(String(quote.contact_released_bid_ids || "[]"));
+    releasedBidIds = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    releasedBidIds = [];
+  }
+  releasedBidIds = releasedBidIds.filter((releasedBidId) => String(releasedBidId) !== String(id));
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM reviews WHERE bid_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM bids WHERE id = ?").bind(id),
+    env.DB.prepare("UPDATE customer_quotes SET selected_bid_id = CASE WHEN selected_bid_id = ? THEN '' ELSE selected_bid_id END, contact_released_bid_ids = ? WHERE id = ?").bind(id, JSON.stringify(releasedBidIds), bid.quote_id),
+  ]);
+
+  const updatedQuote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ? LIMIT 1").bind(bid.quote_id).first();
+  const bids = await getQuoteBids(env, bid.quote_id);
+  const images = await getQuoteImages(env, bid.quote_id);
+  return json({ ok: true, quoteId: bid.quote_id, row: normalizeCustomerQuote({ ...updatedQuote, bid_count: bids.length, bids }, images) });
+}
+
 async function updateCustomerQuote(env, request, id) {
   await ensureCustomerQuoteColumns(env);
   const body = await request.json().catch(() => ({}));
@@ -1246,6 +1274,9 @@ export async function onRequest(context) {
   }
   if (path.startsWith("customer-quotes/") && method === "DELETE") {
     return deleteCustomerQuote(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
+  if (path.startsWith("bids/") && method === "DELETE") {
+    return deleteManagerBid(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }
   if (path.startsWith("approved-sellers/") && method === "PATCH") {
     return updateApprovedSeller(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
