@@ -2397,6 +2397,20 @@ async function saveBrandConsultationAdmin(id) {
   } finally { setAdminLoading(false); }
 }
 
+async function deleteBrandConsultationAdmin(id) {
+  const row = getBrandConsultationsAdmin().find((item) => String(item.id) === String(id));
+  if (!row) return;
+  if (!window.confirm(`${row.customerName || '고객'}님의 브랜드관 상담 내역을 삭제할까요?\n삭제 후 복구할 수 없습니다.`)) return;
+  setAdminLoading(true, '브랜드관 상담을 삭제하는 중입니다.', '상담·계약·정산 정보를 서버에서 삭제하고 있습니다.');
+  try {
+    const result = await apiJson(`/api/brand-hall/consultations/${encodeURIComponent(id)}`, { method:'DELETE', silent:true });
+    if (!result?.ok) { showToast(result?.message || '브랜드관 상담 삭제에 실패했습니다.'); return; }
+    setBrandConsultationsAdmin(getBrandConsultationsAdmin().filter((item) => String(item.id) !== String(id)));
+    renderBrandHallAdmin();
+    showToast('브랜드관 상담 고객을 삭제했습니다.');
+  } finally { setAdminLoading(false); }
+}
+
 function renderBrandHallAdmin() {
   if (!brandHallPanel) return;
   renderBrandSellerOptions(brandPackageAdminForm?.elements.sellerId?.value || '');
@@ -2414,6 +2428,15 @@ function renderBrandHallAdmin() {
   if (brandConsultAdminRows) {
     brandConsultAdminRows.innerHTML = consultations.length ? consultations.map((row) => `<tr data-brand-consult-row="${escapeBrandHtml(row.id)}"><td><div class="brand-consult-meta"><strong>${brandDate(row.createdAt)}</strong>${escapeBrandHtml(row.deliveryStatus || '')}${row.deliveryError ? `<br><span title="${escapeBrandHtml(row.deliveryError)}">알림 오류</span>` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.customerName)}</strong><a href="tel:${escapeBrandHtml(row.customerPhone)}">${escapeBrandHtml(row.customerPhoneFormatted || formatPhoneNumber(row.customerPhone))}</a><br>${escapeBrandHtml(row.customerRegion || '')}<br>${escapeBrandHtml(row.preferredTime || '')}${row.memo ? `<br>문의: ${escapeBrandHtml(row.memo)}` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.packageTitle || '-')}</strong>공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')}<br>내부: ${escapeBrandHtml(row.channel || '')} ${escapeBrandHtml(row.branch || '')}<br>${escapeBrandHtml(row.manager || '')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</div></td><td><select data-brand-consult-status><option value="new" ${row.status==='new'?'selected':''}>신규</option><option value="contacted" ${row.status==='contacted'?'selected':''}>고객 연락</option><option value="negotiating" ${row.status==='negotiating'?'selected':''}>계약 진행</option><option value="contracted" ${row.status==='contracted'?'selected':''}>계약 완료</option><option value="cancelled" ${row.status==='cancelled'?'selected':''}>취소</option></select></td><td><input data-brand-contract-amount type="number" min="0" step="1000" value="${Number(row.contractAmount || 0)}" /></td><td><input data-brand-commission-amount type="number" min="0" step="1000" value="${Number(row.commissionAmount || 0)}" /></td><td><select data-brand-settlement-status><option value="unsettled" ${row.settlementStatus==='unsettled'?'selected':''}>미정산</option><option value="pending" ${row.settlementStatus==='pending'?'selected':''}>정산예정</option><option value="settled" ${row.settlementStatus==='settled'?'selected':''}>정산완료</option><option value="waived" ${row.settlementStatus==='waived'?'selected':''}>수수료없음</option></select>${row.settledAt ? `<div class="brand-consult-meta">${brandDate(row.settledAt)}</div>` : ''}</td><td><textarea data-brand-admin-memo maxlength="1200" placeholder="상담 내용, 계약 일정, 정산 메모">${escapeBrandHtml(row.adminMemo || '')}</textarea></td><td><button class="primary-btn brand-consult-save-btn" type="button" data-brand-consult-save="${escapeBrandHtml(row.id)}">저장</button></td></tr>`).join('') : '<tr><td colspan="9"><div class="brand-admin-empty">브랜드관 상담 신청이 없습니다.</div></td></tr>';
   }
+  document.querySelectorAll('[data-brand-consult-save]').forEach((saveButton) => {
+    if (saveButton.parentElement?.querySelector('[data-brand-consult-delete]')) return;
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'danger-btn brand-consult-delete-btn';
+    deleteButton.type = 'button';
+    deleteButton.dataset.brandConsultDelete = saveButton.dataset.brandConsultSave;
+    deleteButton.textContent = '고객 삭제';
+    saveButton.insertAdjacentElement('afterend', deleteButton);
+  });
 }
 
 function renderAll() {
@@ -2663,6 +2686,8 @@ document.addEventListener('click', (event) => {
   if (edit) { editBrandPackage(edit.dataset.brandPackageEdit); return; }
   const del = event.target.closest('[data-brand-package-delete]');
   if (del) { deleteBrandPackageAdmin(del.dataset.brandPackageDelete); return; }
+  const consultDelete = event.target.closest('[data-brand-consult-delete]');
+  if (consultDelete) { deleteBrandConsultationAdmin(consultDelete.dataset.brandConsultDelete); return; }
   const consultSave = event.target.closest('[data-brand-consult-save]');
   if (consultSave) { saveBrandConsultationAdmin(consultSave.dataset.brandConsultSave); return; }
 });

@@ -158,6 +158,14 @@ async function updateAdminBrandConsultation(env, request, id) {
   return json({ ok: true, row: normalizeAdminBrandConsultation(row) });
 }
 
+async function deleteAdminBrandConsultation(env, id) {
+  await ensureBrandAdminTables(env);
+  const existing = await env.DB.prepare("SELECT id FROM brand_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  if (!existing) return json({ ok: false, message: '브랜드관 상담을 찾을 수 없습니다.' }, 404);
+  await env.DB.prepare("DELETE FROM brand_consultations WHERE id = ?").bind(id).run();
+  return json({ ok: true, deletedId: id });
+}
+
 let adminChatTablesReady = false;
 async function ensureAdminChatTables(env) {
   if (adminChatTablesReady) return;
@@ -1390,6 +1398,7 @@ export async function onRequest(context) {
   if (path.startsWith("brand-hall/packages/") && method === "PATCH") return saveAdminBrandPackage(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path.startsWith("brand-hall/packages/") && method === "DELETE") return deleteAdminBrandPackage(env, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path.startsWith("brand-hall/consultations/") && method === "PATCH") return updateAdminBrandConsultation(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/consultations/") && method === "DELETE") return deleteAdminBrandConsultation(env, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path === "anonymous-consultations" && method === "GET") return getAdminAnonymousConsultations(env, request);
   if (path === "anonymous-policy-cases" && method === "GET") return getAnonymousCases(env);
   if (path.startsWith("anonymous-policy-cases/") && method === "PATCH") return reviewAnonymousCase(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
