@@ -30,6 +30,8 @@ let lplanSyncing = false;
 let lplanLastCheckedAt = "";
 let adminQuoteCountdownTimer = 0;
 let visitStatsRefreshTimer = 0;
+let customerQuotesRefreshTimer = 0;
+let customerQuotesRefreshing = false;
 let adminQuoteSummaryKey = "";
 let customerQuoteSearchTerm = "";
 const SELLER_CHANNELS = [
@@ -590,6 +592,19 @@ async function refreshVisitStatsOnly() {
   if (!result?.ok) return;
   localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(result));
   renderStats();
+}
+
+async function refreshCustomerQuotesOnly() {
+  if (customerQuotesRefreshing || document.hidden) return;
+  customerQuotesRefreshing = true;
+  try {
+    const result = await loadCustomerQuotesFromServer({ silent: true });
+    if (!result?.ok || !Array.isArray(result.rows)) return;
+    writeStorageArray(STORAGE_KEYS.customerQuotes, result.rows);
+    renderAll();
+  } finally {
+    customerQuotesRefreshing = false;
+  }
 }
 
 async function loadSellerAccessLogsFromServer(options = {}) {
@@ -2770,6 +2785,7 @@ if (initialApplicationIdFromUrl) {
 updateLastRefreshedDisplay();
 renderAll();
 visitStatsRefreshTimer = window.setInterval(refreshVisitStatsOnly, 5 * 60 * 1000);
+customerQuotesRefreshTimer = window.setInterval(refreshCustomerQuotesOnly, 30 * 1000);
 showToast("서버 데이터는 상단 새로고침 버튼을 눌렀을 때만 불러옵니다.");
 
 
