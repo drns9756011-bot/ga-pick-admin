@@ -64,6 +64,37 @@ async function getSiteVisitStats(env) {
   return json({ ok: true, today: { date: today, pageViews: Number(todayRow?.page_views || 0), uniqueVisitors: Number(todayRow?.unique_visitors || 0) }, last7Days: { from: sevenDaysAgo, to: today, pageViews: Number(sevenDayRow?.page_views || 0), uniqueVisitors: Number(sevenDayRow?.unique_visitors || 0) }, total: { pageViews: Number(totalRow?.page_views || 0), dailyUniqueVisitors: Number(totalRow?.unique_visitors || 0) }, daily: (dailyRows?.results || []).map((row) => ({ date: row.visit_date, pageViews: Number(row.page_views || 0), uniqueVisitors: Number(row.unique_visitors || 0) })) });
 }
 
+let sellerAccessAdminTablesReady = false;
+async function ensureSellerAccessAdminTables(env) {
+  if (sellerAccessAdminTablesReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS seller_access_logs (id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, access_type TEXT NOT NULL DEFAULT 'login', access_date TEXT NOT NULL, accessed_at TEXT NOT NULL, ip_masked TEXT DEFAULT '', ip_hash TEXT DEFAULT '', user_agent TEXT DEFAULT '', device_type TEXT DEFAULT '', browser_name TEXT DEFAULT '', created_at TEXT NOT NULL)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_seller_access_logs_seller_time ON seller_access_logs(seller_id, accessed_at DESC)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_seller_access_logs_date ON seller_access_logs(access_date, accessed_at DESC)`),
+  ]);
+  sellerAccessAdminTablesReady = true;
+}
+
+async function getSellerAccessLogsAdmin(env, request) {
+  await ensureSellerAccessAdminTables(env);
+  const url = new URL(request.url);
+  const limit = Math.min(500, Math.max(20, Number(url.searchParams.get('limit') || 200) || 200));
+  const sellerId = String(url.searchParams.get('sellerId') || '').trim();
+  const days = Math.min(365, Math.max(1, Number(url.searchParams.get('days') || 30) || 30));
+  const fromDate = adminDateKeyDaysAgo(days - 1);
+  const today = adminTodayKey();
+  const where = ['l.access_date >= ?'];
+  const values = [fromDate];
+  if (sellerId) { where.push('l.seller_id = ?'); values.push(sellerId); }
+  const rows = await env.DB.prepare(`SELECT l.id, l.seller_id, l.access_type, l.access_date, l.accessed_at, l.ip_masked, l.device_type, l.browser_name, s.channel, s.branch, s.branch_region, s.manager, s.manager_position FROM seller_access_logs l LEFT JOIN approved_sellers s ON s.seller_id = l.seller_id WHERE ${where.join(' AND ')} ORDER BY l.accessed_at DESC LIMIT ?`).bind(...values, limit).all();
+  const [todaySummary, weekSummary, totalSummary] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs WHERE access_date = ?`).bind(today).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs WHERE access_date >= ? AND access_date <= ?`).bind(adminDateKeyDaysAgo(6), today).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS login_count, COUNT(DISTINCT seller_id) AS seller_count FROM seller_access_logs`).first(),
+  ]);
+  return json({ ok: true, summary: { today: { loginCount: Number(todaySummary?.login_count || 0), sellerCount: Number(todaySummary?.seller_count || 0) }, last7Days: { loginCount: Number(weekSummary?.login_count || 0), sellerCount: Number(weekSummary?.seller_count || 0) }, total: { loginCount: Number(totalSummary?.login_count || 0), sellerCount: Number(totalSummary?.seller_count || 0) } }, rows: (rows.results || []).map((row) => ({ id: row.id, sellerId: row.seller_id, accessType: row.access_type, accessDate: row.access_date, accessedAt: row.accessed_at, ipMasked: row.ip_masked || '', deviceType: row.device_type || '기타', browserName: row.browser_name || '기타', channel: row.channel || '', branch: row.branch || '', branchRegion: row.branch_region || '', manager: row.manager || '', managerPosition: row.manager_position || '' })) });
+}
+
 let brandAdminTablesReady = false;
 async function ensureBrandAdminTables(env) {
   if (brandAdminTablesReady) return;
@@ -1393,6 +1424,7 @@ export async function onRequest(context) {
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
   if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);
+  if (path === "seller-access-logs" && method === "GET") return getSellerAccessLogsAdmin(env, request);
   if (path === "brand-hall" && method === "GET") return getAdminBrandHall(env);
   if (path === "brand-hall/packages" && method === "POST") return saveAdminBrandPackage(env, request);
   if (path.startsWith("brand-hall/packages/") && method === "PATCH") return saveAdminBrandPackage(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
