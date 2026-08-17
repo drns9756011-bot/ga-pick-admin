@@ -1,0 +1,27 @@
+.subscription-admin { max-width: 1500px; }
+.subscription-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.subscription-status-grid article { min-height: 112px; padding: 22px; display: grid; align-content: center; gap: 10px; background: #fff; border: 1px solid var(--line, #d8e1ea); border-radius: 7px; }
+.subscription-status-grid span { color: #667789; font-size: 13px; font-weight: 750; }
+.subscription-status-grid strong { color: #102c4c; font-size: 24px; }
+.subscription-upload-panel { overflow: hidden; }
+.subscription-upload-body { padding: 24px; }
+.subscription-dropzone { width: 100%; min-height: 150px; display: grid; place-items: center; align-content: center; gap: 10px; border: 1px dashed #8ea8c1; border-radius: 7px; background: #f7fafd; color: #173f6b; cursor: pointer; }
+.subscription-dropzone:hover, .subscription-dropzone:focus-visible { border-color: #174a7c; background: #f1f6fb; outline: none; }
+.subscription-dropzone strong { font-size: 19px; }
+.subscription-dropzone span { max-width: 100%; padding: 0 20px; color: #637588; overflow-wrap: anywhere; }
+.subscription-policy { margin: 18px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #d8e1ea; border-radius: 7px; overflow: hidden; }
+.subscription-policy div { min-width: 0; padding: 17px 18px; border-right: 1px solid #d8e1ea; }
+.subscription-policy div:last-child { border-right: 0; }
+.subscription-policy dt { color: #6a7a8b; font-size: 12px; font-weight: 750; }
+.subscription-policy dd { margin: 8px 0 0; color: #142f4e; font-weight: 800; }
+.subscription-upload-actions { margin-top: 20px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.subscription-upload-actions p { margin: 0; color: #5e7082; line-height: 1.6; }
+.subscription-upload-actions .primary-btn { flex: 0 0 190px; }
+.subscription-upload-actions .primary-btn:disabled, .subscription-dropzone:disabled { cursor: not-allowed; opacity: .5; }
+@media (max-width: 760px) {
+  .subscription-status-grid, .subscription-policy { grid-template-columns: 1fr; }
+  .subscription-policy div { border-right: 0; border-bottom: 1px solid #d8e1ea; }
+  .subscription-policy div:last-child { border-bottom: 0; }
+  .subscription-upload-actions { align-items: stretch; flex-direction: column; }
+  .subscription-upload-actions .primary-btn { flex-basis: auto; width: 100%; }
+}

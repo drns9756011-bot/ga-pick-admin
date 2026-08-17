@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>구독 상품 업로드 | 픽견적 관리자</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <link rel="stylesheet" href="/admin.css?v=20260817-navy-admin-ui" />
+    <link rel="stylesheet" href="/subscription-products/subscription-products.css?v=20260817-secure-upload-v1" />
+    <script defer src="/subscription-products/subscription-products.js?v=20260817-secure-upload-v1"></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="픽견적 관리자 홈">
+        <span class="brand-mark">P</span>
+        <span>픽견적<small>관리자 콘솔</small></span>
+      </a>
+      <nav class="side-nav" aria-label="관리자 메뉴">
+        <span class="nav-label">운영 메뉴</span>
+        <a href="/">관리 현황</a>
+        <a href="/customers">고객 견적</a>
+        <a href="/sellers">판매자 신청</a>
+        <a href="/approved-sellers">승인 판매자</a>
+        <a href="/brand-hall">브랜드관 관리</a>
+        <a href="/seller-access">판매자 접속 기록</a>
+        <a href="/alimtalk">알림톡 상태</a>
+        <a href="/anonymous-consultation">익명상담 판정</a>
+        <a class="is-active" href="/subscription-products" aria-current="page">구독 상품 업로드</a>
+        <a href="/anonymous-chat">채팅 관리</a>
+      </nav>
+      <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면으로</a>
+    </aside>
+
+    <main class="admin-shell subscription-admin">
+      <header class="admin-header">
+        <div>
+          <p class="eyebrow">Subscription Data</p>
+          <h1>구독 상품 엑셀 업로드</h1>
+          <p class="header-copy">최신 72개월 구독 상품 데이터로 서버 목록을 교체합니다.</p>
+        </div>
+        <div class="admin-actions">
+          <button class="ghost-btn" id="adminAuthBtn" type="button">관리자 인증</button>
+          <button class="primary-btn" id="refreshStatusBtn" type="button">상태 새로고침</button>
+        </div>
+      </header>
+
+      <section class="subscription-status-grid" aria-label="구독 상품 서버 상태">
+        <article><span>활성 상품</span><strong id="activeProductCount">확인 전</strong></article>
+        <article><span>마지막 교체</span><strong id="lastActivatedAt">확인 전</strong></article>
+        <article><span>이미지 미연결</span><strong id="missingImageCount">확인 전</strong></article>
+      </section>
+
+      <section class="panel subscription-upload-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Private Upload</p>
+            <h2>최신 엑셀 선택</h2>
+            <p class="panel-note">원본 파일은 보관하지 않으며 서버 변환 완료 후 즉시 폐기됩니다.</p>
+          </div>
+        </div>
+
+        <div class="subscription-upload-body">
+          <input id="subscriptionExcelInput" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden />
+          <button class="subscription-dropzone" id="chooseExcelBtn" type="button">
+            <strong>엑셀 파일 선택</strong>
+            <span id="selectedExcelName">선택된 파일 없음</span>
+          </button>
+
+          <dl class="subscription-policy">
+            <div><dt>대상 시트</dt><dd>전자랜드</dd></div>
+            <div><dt>반영 조건</dt><dd>72개월 · 결합없음 · 기본요금</dd></div>
+            <div><dt>보관 정책</dt><dd>최신 서버 데이터 1세트만 유지</dd></div>
+          </dl>
+
+          <div class="subscription-upload-actions">
+            <p id="uploadStatus" role="status" aria-live="polite">업로드할 파일을 선택해주세요.</p>
+            <button class="primary-btn" id="uploadExcelBtn" type="button" disabled>서버 데이터 교체</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

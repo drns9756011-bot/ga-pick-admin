@@ -15,6 +15,11 @@ const STORAGE_KEYS = {
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
+const adminSubscriptionLink = document.createElement("a");
+adminSubscriptionLink.href = "/subscription-products";
+adminSubscriptionLink.textContent = "구독 상품 업로드";
+document.querySelector('.side-nav a[href="/anonymous-chat"]')?.insertAdjacentElement("beforebegin", adminSubscriptionLink);
+
 // 마지막으로 정상 조회한 서버 데이터는 화면 표시용 스냅샷으로 유지합니다.
 // 메뉴 이동이나 페이지 재실행만으로 서버를 다시 조회하지 않으며,
 // 사용자가 상단 새로고침을 눌렀을 때만 새 데이터로 교체합니다.

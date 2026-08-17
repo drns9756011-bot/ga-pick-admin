@@ -5,6 +5,8 @@
   "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
+import { read as readWorkbook, utils as workbookUtils } from "xlsx";
+
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
   SOLAPI_FROM: "01066312323",
@@ -1376,6 +1378,189 @@ async function uploadFile(env, request) {
   return json({ ok: true, key: saved.key, url: saved.url });
 }
 
+const SUBSCRIPTION_CATEGORY_MAP = {
+  TV: "TV",
+  "스탠바이미": "TV",
+  "냉장고 (일반)": "냉장고",
+  "냉장고 (상냉장)": "냉장고",
+  "냉장고 (양문형)": "냉장고",
+  "냉장고 (얼음정수기)": "냉장고",
+  "냉장고 (김치냉장고)": "김치냉장고",
+  "세탁기 (드럼)": "세탁기·건조기",
+  "세탁기 (건조기)": "세탁기·건조기",
+  "세탁기 (워시타워)": "세탁기·건조기",
+  "세탁기 (워시콤보)": "세탁기·건조기",
+  "세탁기 (미니워시)": "세탁기·건조기",
+  "세탁기 (통돌이)": "세탁기·건조기",
+  "정수기": "정수기",
+  "얼음정수기": "정수기",
+  "공기청정기": "공기청정기",
+  "전기레인지": "주방가전",
+  "식기세척기": "주방가전",
+  "광파오븐": "주방가전",
+  "로봇청소기": "청소기",
+  "청소기": "청소기",
+  "에어컨 (스탠드)": "에어컨",
+  "에어컨 (2in1)": "에어컨",
+  "에어컨 (벽걸이)": "에어컨",
+};
+
+let subscriptionProductSchemaReady = false;
+async function ensureSubscriptionProductSchema(env) {
+  if (subscriptionProductSchemaReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS subscription_product_sets (
+      id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'staging', source_name TEXT NOT NULL DEFAULT '',
+      source_date TEXT NOT NULL DEFAULT '', product_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, activated_at TEXT DEFAULT ''
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS subscription_products (
+      id TEXT PRIMARY KEY, set_id TEXT NOT NULL, brand TEXT NOT NULL, category TEXT NOT NULL,
+      source_category TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, name TEXT NOT NULL,
+      monthly_fee_72 INTEGER NOT NULL, care_type TEXT DEFAULT '', care_detail TEXT DEFAULT '',
+      visit_cycle TEXT DEFAULT '', image_url TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )`),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_products_set_model ON subscription_products(set_id, model)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_subscription_product_sets_status ON subscription_product_sets(status, activated_at DESC)"),
+  ]);
+  subscriptionProductSchemaReady = true;
+}
+
+async function getActiveSubscriptionImageMap(env) {
+  const active = await env.DB.prepare(
+    "SELECT id FROM subscription_product_sets WHERE status = 'active' ORDER BY activated_at DESC LIMIT 1"
+  ).first();
+  const images = new Map();
+  if (!active) return images;
+  for (let offset = 0; offset < 5000; offset += 500) {
+    const result = await env.DB.prepare(
+      "SELECT model, image_url FROM subscription_products WHERE set_id = ? LIMIT 500 OFFSET ?"
+    ).bind(active.id, offset).all();
+    const rows = result.results || [];
+    rows.forEach((row) => {
+      if (row.model && row.image_url) images.set(String(row.model).toUpperCase(), String(row.image_url));
+    });
+    if (rows.length < 500) break;
+  }
+  return images;
+}
+
+function parseSubscriptionWorkbook(arrayBuffer, imageMap) {
+  const workbook = readWorkbook(arrayBuffer, { type: "array", cellDates: false });
+  const worksheet = workbook.Sheets["전자랜드"];
+  if (!worksheet) throw new Error("전자랜드 시트를 찾을 수 없습니다.");
+  const rows = workbookUtils.sheet_to_json(worksheet, { header: 1, raw: true, defval: "" });
+  const bestByModel = new Map();
+
+  rows.slice(1).forEach((row) => {
+    const contractMonths = String(row[7] ?? "").trim();
+    const bundleType = String(row[8] ?? "").trim();
+    const model = String(row[1] ?? "").trim().toUpperCase();
+    const monthlyFee72 = Math.round(Number(String(row[12] ?? "").replaceAll(",", "")));
+    if (contractMonths !== "72" || bundleType !== "결합없음" || !model || monthlyFee72 <= 0) return;
+
+    const sourceCategory = String(row[0] ?? "").trim();
+    const item = {
+      brand: "LG전자",
+      category: SUBSCRIPTION_CATEGORY_MAP[sourceCategory] || "생활가전",
+      sourceCategory,
+      model,
+      name: `LG ${sourceCategory}`,
+      monthlyFee72,
+      careType: String(row[4] ?? "").trim(),
+      careDetail: String(row[5] ?? "").trim(),
+      visitCycle: String(row[6] ?? "").trim(),
+      imageUrl: imageMap.get(model) || "",
+    };
+    const previous = bestByModel.get(model);
+    if (!previous || item.monthlyFee72 < previous.monthlyFee72) bestByModel.set(model, item);
+  });
+
+  const items = [...bestByModel.values()].sort((a, b) =>
+    a.category.localeCompare(b.category, "ko")
+      || a.sourceCategory.localeCompare(b.sourceCategory, "ko")
+      || a.model.localeCompare(b.model, "en")
+  );
+  if (!items.length || items.length > 3000) throw new Error("72개월·결합없음 상품을 1~3,000개 범위에서 찾을 수 없습니다.");
+  return items;
+}
+
+async function replaceSubscriptionProductsFromUpload(env, items) {
+  const now = new Date().toISOString();
+  const setId = createId("subscription-set");
+  await env.DB.prepare(
+    `INSERT INTO subscription_product_sets
+      (id, status, source_name, source_date, product_count, created_at, activated_at)
+     VALUES (?, 'staging', '구독 상품 데이터', ?, ?, ?, '')`
+  ).bind(setId, adminTodayKey(), items.length, now).run();
+
+  try {
+    for (let offset = 0; offset < items.length; offset += 75) {
+      await env.DB.batch(items.slice(offset, offset + 75).map((item, localIndex) => env.DB.prepare(
+        `INSERT INTO subscription_products
+          (id, set_id, brand, category, source_category, model, name, monthly_fee_72,
+           care_type, care_detail, visit_cycle, image_url, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        createId("subscription-product"), setId, item.brand, item.category, item.sourceCategory,
+        item.model, item.name, item.monthlyFee72, item.careType, item.careDetail, item.visitCycle,
+        item.imageUrl, offset + localIndex, now
+      )));
+    }
+    await env.DB.batch([
+      env.DB.prepare("UPDATE subscription_product_sets SET status = 'archived' WHERE status = 'active'"),
+      env.DB.prepare("UPDATE subscription_product_sets SET status = 'active', activated_at = ? WHERE id = ?").bind(now, setId),
+    ]);
+  } catch (error) {
+    await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(setId).run().catch(() => {});
+    await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ?").bind(setId).run().catch(() => {});
+    throw error;
+  }
+
+  const archived = await env.DB.prepare("SELECT id FROM subscription_product_sets WHERE status = 'archived'").all();
+  for (const row of archived.results || []) {
+    await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(row.id).run();
+    await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ?").bind(row.id).run();
+  }
+  return { setId, count: items.length, activatedAt: now };
+}
+
+async function uploadSubscriptionWorkbook(env, request) {
+  await ensureSubscriptionProductSchema(env);
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (contentLength > 16 * 1024 * 1024) return json({ ok: false, message: "엑셀 파일은 15MB 이하여야 합니다." }, 413);
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof File) || !file.name) return json({ ok: false, message: "업로드할 엑셀 파일을 선택해주세요." }, 400);
+  if (!/\.(xlsx|xlsm)$/i.test(file.name)) return json({ ok: false, message: "xlsx 또는 xlsm 파일만 업로드할 수 있습니다." }, 400);
+  if (file.size > 15 * 1024 * 1024) return json({ ok: false, message: "엑셀 파일은 15MB 이하여야 합니다." }, 413);
+
+  const bytes = await file.arrayBuffer();
+  const signature = new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength));
+  if (signature[0] !== 0x50 || signature[1] !== 0x4b) return json({ ok: false, message: "올바른 엑셀 파일이 아닙니다." }, 400);
+
+  const imageMap = await getActiveSubscriptionImageMap(env);
+  const items = parseSubscriptionWorkbook(bytes, imageMap);
+  const result = await replaceSubscriptionProductsFromUpload(env, items);
+  return json({ ok: true, ...result, originalFileStored: false, previousDataDeleted: true });
+}
+
+async function getSubscriptionUploadStatus(env) {
+  await ensureSubscriptionProductSchema(env);
+  const row = await env.DB.prepare(
+    `SELECT s.product_count, s.source_date, s.activated_at,
+      (SELECT COUNT(*) FROM subscription_products p WHERE p.set_id = s.id AND COALESCE(p.image_url, '') = '') AS missing_images
+     FROM subscription_product_sets s WHERE s.status = 'active' ORDER BY s.activated_at DESC LIMIT 1`
+  ).first();
+  return json({ ok: true, active: row ? {
+    count: Number(row.product_count || 0),
+    sourceDate: row.source_date || "",
+    activatedAt: row.activated_at || "",
+    missingImages: Number(row.missing_images || 0),
+  } : null, originalFileStored: false });
+}
+
 let anonymousTablesReady = false;
 async function ensureAnonymousTables(env) {
   if (anonymousTablesReady) return;
@@ -1426,6 +1611,8 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
+  if (path === "subscription-products/status" && method === "GET") return getSubscriptionUploadStatus(env);
+  if (path === "subscription-products/upload" && method === "POST") return uploadSubscriptionWorkbook(env, request);
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
