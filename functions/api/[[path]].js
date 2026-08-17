@@ -1419,11 +1419,16 @@ async function ensureSubscriptionProductSchema(env) {
       source_category TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, name TEXT NOT NULL,
       monthly_fee_72 INTEGER NOT NULL, care_type TEXT DEFAULT '', care_detail TEXT DEFAULT '',
       visit_cycle TEXT DEFAULT '', image_url TEXT DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0,
+      options_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     )`),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_products_set_model ON subscription_products(set_id, model)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_subscription_product_sets_status ON subscription_product_sets(status, activated_at DESC)"),
   ]);
+  const columns = await env.DB.prepare("PRAGMA table_info(subscription_products)").all();
+  if (!(columns.results || []).some((column) => column.name === "options_json")) {
+    await env.DB.prepare("ALTER TABLE subscription_products ADD COLUMN options_json TEXT NOT NULL DEFAULT '[]'").run();
+  }
   subscriptionProductSchemaReady = true;
 }
 
@@ -1435,23 +1440,29 @@ async function getActiveSubscriptionImageMap(env) {
   if (!active) return images;
   for (let offset = 0; offset < 5000; offset += 500) {
     const result = await env.DB.prepare(
-      "SELECT model, image_url FROM subscription_products WHERE set_id = ? LIMIT 500 OFFSET ?"
+      "SELECT model, image_url, options_json FROM subscription_products WHERE set_id = ? LIMIT 500 OFFSET ?"
     ).bind(active.id, offset).all();
     const rows = result.results || [];
     rows.forEach((row) => {
       if (row.model && row.image_url) images.set(String(row.model).toUpperCase(), String(row.image_url));
+      try {
+        const options = JSON.parse(row.options_json || "[]");
+        if (row.image_url && Array.isArray(options)) options.forEach((option) => {
+          if (option?.model) images.set(String(option.model).toUpperCase(), String(row.image_url));
+        });
+      } catch (_) {}
     });
     if (rows.length < 500) break;
   }
   return images;
 }
 
-function parseSubscriptionWorkbook(arrayBuffer, imageMap) {
+export function parseSubscriptionWorkbook(arrayBuffer, imageMap) {
   const workbook = readWorkbook(arrayBuffer, { type: "array", cellDates: false });
   const worksheet = workbook.Sheets["전자랜드"];
   if (!worksheet) throw new Error("전자랜드 시트를 찾을 수 없습니다.");
   const rows = workbookUtils.sheet_to_json(worksheet, { header: 1, raw: true, defval: "" });
-  const bestByModel = new Map();
+  const groups = new Map();
 
   rows.slice(1).forEach((row) => {
     const contractMonths = String(row[7] ?? "").trim();
@@ -1461,23 +1472,54 @@ function parseSubscriptionWorkbook(arrayBuffer, imageMap) {
     if (contractMonths !== "72" || bundleType !== "결합없음" || !model || monthlyFee72 <= 0) return;
 
     const sourceCategory = String(row[0] ?? "").trim();
-    const item = {
-      brand: "LG전자",
-      category: SUBSCRIPTION_CATEGORY_MAP[sourceCategory] || "생활가전",
-      sourceCategory,
-      model,
-      name: `LG ${sourceCategory}`,
-      monthlyFee72,
-      careType: String(row[4] ?? "").trim(),
-      careDetail: String(row[5] ?? "").trim(),
-      visitCycle: String(row[6] ?? "").trim(),
-      imageUrl: imageMap.get(model) || "",
-    };
-    const previous = bestByModel.get(model);
-    if (!previous || item.monthlyFee72 < previous.monthlyFee72) bestByModel.set(model, item);
+    const category = SUBSCRIPTION_CATEGORY_MAP[sourceCategory] || "생활가전";
+    let groupModel = model;
+    let installationType = "";
+    if (category === "TV") {
+      const dotIndex = model.indexOf(".");
+      const modelBody = dotIndex >= 0 ? model.slice(0, dotIndex) : model;
+      const suffix = dotIndex >= 0 ? model.slice(dotIndex) : "";
+      const match = /^(.*)([SW])$/.exec(modelBody);
+      if (match) {
+        groupModel = `${match[1]}${suffix}`;
+        installationType = match[2] === "S" ? "스탠드형" : "벽걸이형";
+      }
+    }
+    const careType = String(row[4] ?? "").trim();
+    const careDetail = String(row[5] ?? "").trim();
+    const visitCycle = String(row[6] ?? "").trim();
+    const label = [installationType, careType, careDetail, visitCycle ? `${visitCycle} 주기` : ""].filter(Boolean).join(" · ") || model;
+    const option = { label, model, installationType, careType, careDetail, visitCycle, monthlyFee72 };
+    const groupKey = `${category}|${groupModel}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, {
+      brand: "LG전자", category, sourceCategory, model: groupModel, name: `LG ${sourceCategory}`,
+      monthlyFee72: 0, careType: "", careDetail: "", visitCycle: "", imageUrl: "", optionMap: new Map(),
+    });
+    const group = groups.get(groupKey);
+    const optionKey = `${model}|${installationType}|${careType}|${careDetail}|${visitCycle}`;
+    const previous = group.optionMap.get(optionKey);
+    if (!previous || option.monthlyFee72 < previous.monthlyFee72) group.optionMap.set(optionKey, option);
   });
 
-  const items = [...bestByModel.values()].sort((a, b) =>
+  const items = [...groups.values()].map((group) => {
+    const options = [...group.optionMap.values()].sort((a, b) =>
+      a.monthlyFee72 - b.monthlyFee72
+        || a.installationType.localeCompare(b.installationType, "ko")
+        || a.careType.localeCompare(b.careType, "ko")
+        || a.model.localeCompare(b.model, "en")
+    );
+    const primary = options[0];
+    return {
+      ...group,
+      monthlyFee72: primary.monthlyFee72,
+      careType: primary.careType,
+      careDetail: primary.careDetail,
+      visitCycle: primary.visitCycle,
+      imageUrl: imageMap.get(primary.model) || imageMap.get(group.model) || "",
+      options,
+      optionMap: undefined,
+    };
+  }).sort((a, b) =>
     a.category.localeCompare(b.category, "ko")
       || a.sourceCategory.localeCompare(b.sourceCategory, "ko")
       || a.model.localeCompare(b.model, "en")
@@ -1500,12 +1542,12 @@ async function replaceSubscriptionProductsFromUpload(env, items) {
       await env.DB.batch(items.slice(offset, offset + 75).map((item, localIndex) => env.DB.prepare(
         `INSERT INTO subscription_products
           (id, set_id, brand, category, source_category, model, name, monthly_fee_72,
-           care_type, care_detail, visit_cycle, image_url, sort_order, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           care_type, care_detail, visit_cycle, image_url, options_json, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         createId("subscription-product"), setId, item.brand, item.category, item.sourceCategory,
         item.model, item.name, item.monthlyFee72, item.careType, item.careDetail, item.visitCycle,
-        item.imageUrl, offset + localIndex, now
+        item.imageUrl, JSON.stringify(item.options || []), offset + localIndex, now
       )));
     }
     await env.DB.batch([
@@ -1527,6 +1569,8 @@ async function replaceSubscriptionProductsFromUpload(env, items) {
 }
 
 async function uploadSubscriptionWorkbook(env, request) {
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
   await ensureSubscriptionProductSchema(env);
   const contentLength = Number(request.headers.get("Content-Length") || 0);
   if (contentLength > 16 * 1024 * 1024) return json({ ok: false, message: "엑셀 파일은 15MB 이하여야 합니다." }, 413);
@@ -1546,7 +1590,9 @@ async function uploadSubscriptionWorkbook(env, request) {
   return json({ ok: true, ...result, originalFileStored: false, previousDataDeleted: true });
 }
 
-async function getSubscriptionUploadStatus(env) {
+async function getSubscriptionUploadStatus(env, request) {
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
   await ensureSubscriptionProductSchema(env);
   const row = await env.DB.prepare(
     `SELECT s.product_count, s.source_date, s.activated_at,
@@ -1611,7 +1657,7 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
-  if (path === "subscription-products/status" && method === "GET") return getSubscriptionUploadStatus(env);
+  if (path === "subscription-products/status" && method === "GET") return getSubscriptionUploadStatus(env, request);
   if (path === "subscription-products/upload" && method === "POST") return uploadSubscriptionWorkbook(env, request);
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {

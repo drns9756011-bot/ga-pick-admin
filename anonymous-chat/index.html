@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>익명상담 채팅 관리</title>
   <link rel="stylesheet" href="/admin.css?v=20260817-navy-admin-ui" />
+  <script defer src="/server-loading.js?v=20260817-global-server-modal-v1"></script>
   <style>
     .chat-admin-wrap { max-width: 1440px; margin: 0 auto; padding: 28px; }
     .chat-admin-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 18px; }
@@ -24,7 +25,7 @@
 <body>
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="픽견적 관리자 홈"><span class="brand-mark">P</span><span>픽견적<small>관리자 콘솔</small></span></a>
-    <nav class="side-nav" aria-label="관리자 메뉴"><span class="nav-label">운영 메뉴</span><a href="/">관리 현황</a><a href="/customers">고객 견적</a><a href="/sellers">판매자 신청</a><a href="/approved-sellers">승인 판매자</a><a href="/brand-hall">브랜드관 관리</a><a class="is-active" href="/anonymous-chat">채팅 관리</a><a href="/anonymous-consultation">익명상담 판정</a><a href="/alimtalk">알림톡 상태</a></nav>
+    <nav class="side-nav" aria-label="관리자 메뉴"><span class="nav-label">운영 메뉴</span><a href="/">관리 현황</a><a href="/customers">고객 견적</a><a href="/sellers">판매자 신청</a><a href="/approved-sellers">승인 판매자</a><a href="/brand-hall">브랜드관 관리</a><a href="/subscription-products">구독 상품 업로드</a><a class="is-active" href="/anonymous-chat">채팅 관리</a><a href="/anonymous-consultation">익명상담 판정</a><a href="/alimtalk">알림톡 상태</a></nav>
   </aside>
   <main class="admin-shell"><div class="chat-admin-wrap">
     <header class="admin-header"><div><p class="eyebrow">Anonymous Chat</p><h1>익명상담 채팅 관리</h1><p class="header-copy">고객과 판매자의 익명상담 채팅방과 메시지를 서버에서 확인합니다.</p></div><button class="primary-btn" id="refresh" type="button">새로고침</button></header>
