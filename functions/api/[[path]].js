@@ -51,6 +51,10 @@ async function ensureSiteVisitTables(env) {
   ]);
 }
 
+async function ensureApprovedSellerOptOutColumn(env) {
+  await env.DB.prepare("ALTER TABLE approved_sellers ADD COLUMN quote_alimtalk_opt_out INTEGER NOT NULL DEFAULT 0").run().catch(() => {});
+}
+
 async function getSiteVisitStats(env) {
   await ensureSiteVisitTables(env);
   const today = adminTodayKey();
@@ -346,6 +350,7 @@ function normalizeApprovedSeller(row) {
     reviewedAt: row.reviewed_at || "",
     reviewMemo: row.review_memo || "",
     approvedAt: row.approved_at || "",
+    quoteAlimtalkOptOut: Number(row.quote_alimtalk_opt_out || 0) === 1,
   };
 }
 
@@ -910,6 +915,7 @@ async function updateSellerApplication(env, request, id) {
 }
 
 async function getApprovedSellers(env) {
+  await ensureApprovedSellerOptOutColumn(env);
   const result = await env.DB.prepare("SELECT * FROM approved_sellers ORDER BY approved_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
 }
@@ -1184,6 +1190,7 @@ async function updateCustomerQuote(env, request, id) {
 }
 
 async function updateApprovedSeller(env, request, id) {
+  await ensureApprovedSellerOptOutColumn(env);
   const body = await request.json();
   const existing = await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
@@ -1235,6 +1242,11 @@ async function updateApprovedSeller(env, request, id) {
   if (Object.prototype.hasOwnProperty.call(body, "memo")) {
     updates.push("memo = ?");
     values.push(String(body.memo || "").trim());
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "quoteAlimtalkOptOut")) {
+    updates.push("quote_alimtalk_opt_out = ?");
+    values.push(body.quoteAlimtalkOptOut ? 1 : 0);
   }
 
   if (!updates.length) {
