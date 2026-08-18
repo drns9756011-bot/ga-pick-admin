@@ -1,8 +1,7 @@
-﻿{
+{
   "private": true,
   "type": "module",
   "dependencies": {
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   }
 }
-
