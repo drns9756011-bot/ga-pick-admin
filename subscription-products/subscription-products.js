@@ -182,6 +182,14 @@ async function refreshStatus() {
   refreshButton.disabled = true;
   try {
     const payload = await adminFetch("/api/subscription-products/status");
+    if (Number(payload.active?.missingImages || 0) > 0) {
+      statusText.textContent = "비어 있는 상품 이미지를 복구하고 있습니다.";
+      const repair = await adminFetch("/api/subscription-products/images/repair", { method: "POST" });
+      payload.active.missingImages = Number(repair.remaining || 0);
+      if (Number(repair.repaired || 0) > 0) {
+        statusText.textContent = `${Number(repair.repaired).toLocaleString("ko-KR")}개 상품 이미지를 복구했습니다.`;
+      }
+    }
     document.querySelector("#activeProductCount").textContent = payload.active ? `${Number(payload.active.count).toLocaleString("ko-KR")}개` : "등록 전";
     document.querySelector("#lastActivatedAt").textContent = payload.active ? formatDate(payload.active.activatedAt) : "등록 전";
     document.querySelector("#missingImageCount").textContent = payload.active ? `${Number(payload.active.missingImages).toLocaleString("ko-KR")}개` : "등록 전";

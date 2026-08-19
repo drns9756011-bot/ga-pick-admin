@@ -5,6 +5,8 @@
   "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
+import builtInSubscriptionImageMap from "../data/subscription-image-map.js";
+
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
   SOLAPI_FROM: "01066312323",
@@ -1450,7 +1452,7 @@ async function getActiveSubscriptionImageMap(env) {
   const active = await env.DB.prepare(
     "SELECT id FROM subscription_product_sets WHERE status = 'active' ORDER BY activated_at DESC LIMIT 1"
   ).first();
-  const images = new Map();
+  const images = new Map(Object.entries(builtInSubscriptionImageMap || {}));
   if (!active) return images;
   for (let offset = 0; offset < 5000; offset += 500) {
     const result = await env.DB.prepare(
@@ -1469,6 +1471,50 @@ async function getActiveSubscriptionImageMap(env) {
     if (rows.length < 500) break;
   }
   return images;
+}
+
+function findBuiltInSubscriptionImage(model, optionsJson = "[]") {
+  const direct = builtInSubscriptionImageMap[String(model || "").trim().toUpperCase()];
+  if (direct) return direct;
+  try {
+    const options = JSON.parse(optionsJson || "[]");
+    if (Array.isArray(options)) {
+      for (const option of options) {
+        const imageUrl = builtInSubscriptionImageMap[String(option?.model || "").trim().toUpperCase()];
+        if (imageUrl) return imageUrl;
+      }
+    }
+  } catch (_) {}
+  return "";
+}
+
+async function repairActiveSubscriptionImages(env) {
+  await ensureSubscriptionProductSchema(env);
+  const active = await env.DB.prepare(
+    "SELECT id FROM subscription_product_sets WHERE status = 'active' ORDER BY activated_at DESC LIMIT 1"
+  ).first();
+  if (!active) return json({ ok: true, repaired: 0, remaining: 0 });
+
+  let repaired = 0;
+  for (;;) {
+    const result = await env.DB.prepare(
+      "SELECT id, model, options_json FROM subscription_products WHERE set_id = ? AND (image_url IS NULL OR TRIM(image_url) = '') LIMIT 60"
+    ).bind(active.id).all();
+    const rows = result.results || [];
+    const updates = rows.map((row) => ({ row, imageUrl: findBuiltInSubscriptionImage(row.model, row.options_json) }))
+      .filter((entry) => entry.imageUrl);
+    if (!updates.length) break;
+    await env.DB.batch(updates.map(({ row, imageUrl }) => env.DB.prepare(
+      "UPDATE subscription_products SET image_url = ? WHERE id = ? AND set_id = ?"
+    ).bind(imageUrl, row.id, active.id)));
+    repaired += updates.length;
+    if (rows.length < 60) break;
+  }
+
+  const remainingRow = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM subscription_products WHERE set_id = ? AND (image_url IS NULL OR TRIM(image_url) = '')"
+  ).bind(active.id).first();
+  return json({ ok: true, repaired, remaining: Number(remainingRow?.count || 0) });
 }
 
 function normalizeSubscriptionImportText(value, maxLength = 160) {
@@ -1661,6 +1707,7 @@ export async function onRequest(context) {
   if (denied) return denied;
 
   if (path === "subscription-products/status" && method === "GET") return handleSubscriptionImport(() => getSubscriptionUploadStatus(env, request));
+  if (path === "subscription-products/images/repair" && method === "POST") return handleSubscriptionImport(() => repairActiveSubscriptionImages(env));
   if (path === "subscription-products/import/start" && method === "POST") return handleSubscriptionImport(() => startSubscriptionProductImport(env));
   if (path.startsWith("subscription-products/import/") && path.endsWith("/chunk") && method === "POST") {
     return handleSubscriptionImport(() => appendSubscriptionProductImportChunk(env, request, decodeURIComponent(pathParts.slice(2, -1).join("/"))));
