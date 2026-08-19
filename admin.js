@@ -1830,6 +1830,68 @@ function customerQuoteMatchesSearch(quote, searchTerm) {
   return Boolean(phoneDigits) && normalizePhone(quote.phone).includes(phoneDigits);
 }
 
+function quoteSubmissionAuditSummary(quote) {
+  const audit = quote?.submissionAudit || {};
+  if (!audit.recorded) {
+    return `<div class="quote-audit-panel is-empty"><strong>등록 접속기록</strong><span>감사기록 도입 이전 견적입니다.</span></div>`;
+  }
+  const location = [audit.country, audit.region, audit.city].filter(Boolean).join(" · ") || "위치 확인 불가";
+  return `
+    <div class="quote-audit-panel">
+      <div class="quote-audit-head">
+        <strong>등록 접속기록</strong>
+        <button class="plain-btn small-btn" type="button" data-reveal-quote-audit="${escapeHTML(quote.id)}" ${audit.exactIpAvailable ? "" : "disabled"}>원본 IP 확인</button>
+      </div>
+      <div class="quote-audit-grid">
+        <span><b>마스킹 IP</b>${escapeHTML(audit.ipMasked || "확인 불가")}</span>
+        <span><b>접속지역</b>${escapeHTML(location)}</span>
+        <span><b>기기</b>${escapeHTML([audit.deviceType, audit.browserName].filter(Boolean).join(" · ") || "확인 불가")}</span>
+        <span><b>요청 ID</b>${escapeHTML(audit.cfRay || "확인 불가")}</span>
+        <span><b>동의기록</b>${escapeHTML(audit.consentVersion || "버전 미기록")} · ${escapeHTML(audit.consentedAt ? formatDate(audit.consentedAt) : "시각 미기록")}</span>
+        <span><b>휴대전화 인증</b>${audit.phoneVerified ? "인증 완료" : "미인증"}</span>
+      </div>
+      <p>IP 기반 지역은 참고 정보이며 실제 주소와 다를 수 있습니다.</p>
+      <div class="quote-audit-reveal" data-quote-audit-result="${escapeHTML(quote.id)}" hidden></div>
+    </div>
+  `;
+}
+
+async function revealQuoteSubmissionAudit(quoteId) {
+  const reason = await openAdminTextModal({
+    eyebrow: "Privacy Audit",
+    title: "원본 IP 조회",
+    description: "조회 사유와 관리자 접속기록이 서버에 함께 저장됩니다.",
+    label: "조회 사유",
+    multiline: true,
+    confirmText: "기록하고 확인",
+  });
+  if (reason === null) return;
+  if (String(reason).trim().length < 5) {
+    showToast("조회 사유를 5자 이상 입력해주세요.");
+    return;
+  }
+
+  const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}/submission-audit`, {
+    method: "POST",
+    body: JSON.stringify({ reason: String(reason).trim() }),
+  });
+  if (!result?.ok || !result.audit) {
+    showToast(result?.message || "접수 감사기록을 확인하지 못했습니다.");
+    return;
+  }
+
+  const audit = result.audit;
+  const host = document.querySelector(`[data-quote-audit-result="${CSS.escape(String(quoteId))}"]`);
+  if (!host) return;
+  host.hidden = false;
+  host.innerHTML = `
+    <strong>보호된 원본 기록</strong>
+    <span>원본 IP <b>${escapeHTML(audit.exactIp || "복호화 불가")}</b></span>
+    <span>조회 시각 ${escapeHTML(formatDate(audit.viewedAt))}</span>
+  `;
+  showToast("원본 IP 조회 기록을 서버에 저장했습니다.");
+}
+
 function renderCustomerQuotes() {
   if (!customerQuoteList) return;
   const allQuotes = getCustomerQuotes();
@@ -1882,6 +1944,7 @@ function renderCustomerQuotes() {
               <span data-admin-quote-countdown data-quote-id="${escapeHTML(quote.id)}">남은 시간 ${escapeHTML(getAdminQuoteRemainingLabel(quote))}</span>
             </div>
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
+            ${quoteSubmissionAuditSummary(quote)}
             ${renderQuoteBidSummary(quote)}
             <div class="quote-admin-actions">
               <button class="plain-btn small-btn" type="button" data-replace-customer-quote-image="${escapeHTML(quote.id)}">견적 이미지 교체</button>
@@ -2625,6 +2688,12 @@ document.addEventListener("click", (event) => {
   const replaceCustomerQuoteImageButton = event.target.closest("[data-replace-customer-quote-image]");
   if (replaceCustomerQuoteImageButton) {
     replaceCustomerQuoteImage(replaceCustomerQuoteImageButton.dataset.replaceCustomerQuoteImage);
+    return;
+  }
+
+  const revealQuoteAuditButton = event.target.closest("[data-reveal-quote-audit]");
+  if (revealQuoteAuditButton) {
+    revealQuoteSubmissionAudit(revealQuoteAuditButton.dataset.revealQuoteAudit);
     return;
   }
 

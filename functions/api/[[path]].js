@@ -243,6 +243,56 @@ function createId(prefix) {
   return `${prefix}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function getClientIp(request) {
+  return (
+    request.headers.get("CF-Connecting-IP") ||
+    request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ||
+    request.headers.get("X-Real-IP") ||
+    "unknown"
+  );
+}
+
+function maskClientIp(value) {
+  const ip = String(value || "").trim();
+  if (!ip || ip === "unknown") return "확인 불가";
+  if (ip.includes(":")) {
+    const parts = ip.split(":").filter(Boolean);
+    return `${parts.slice(0, 2).join(":") || "IPv6"}::****`;
+  }
+  const parts = ip.split(".");
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : "마스킹됨";
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || "")));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value || ""));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function decryptQuoteAuditValue(env, encryptedValue) {
+  const value = String(encryptedValue || "").trim();
+  const secret = String(env.QUOTE_AUDIT_ENCRYPTION_KEY || env.ADMIN_API_TOKEN || "").trim();
+  if (!value || !secret) return "";
+  const [version, ivValue, cipherValue] = value.split(".");
+  if (version !== "v1" || !ivValue || !cipherValue) return "";
+  try {
+    const keyBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+    const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64ToBytes(ivValue) },
+      key,
+      base64ToBytes(cipherValue)
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch (_) {
+    return "";
+  }
+}
+
 function sellerName(row) {
   return [row.channel, row.branch].filter(Boolean).join(" ");
 }
@@ -431,6 +481,22 @@ function normalizeCustomerQuote(row, images = []) {
     personalExpiresAt: row.personal_expires_at || "",
     createdAt: row.created_at || "",
     consent: parseJson(row.consent_json, {}),
+    submissionAudit: {
+      recorded: Boolean(row.submission_recorded_at || row.submission_ip_hash),
+      ipMasked: row.submission_ip_masked || "",
+      country: row.submission_country || "",
+      region: row.submission_region || "",
+      city: row.submission_city || "",
+      deviceType: row.submission_device_type || "",
+      browserName: row.submission_browser_name || "",
+      userAgent: row.submission_user_agent || "",
+      cfRay: row.submission_cf_ray || "",
+      consentVersion: row.submission_consent_version || "",
+      consentedAt: row.submission_consented_at || "",
+      recordedAt: row.submission_recorded_at || "",
+      phoneVerified: Number(row.submission_phone_verified || 0) === 1,
+      exactIpAvailable: Boolean(row.submission_ip_encrypted),
+    },
     image: displayImages[0]?.url || row.thumbnail_image || "",
     images: displayImages.map((image) => image.url),
   };
@@ -952,6 +1018,20 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN full_images_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN personal_expires_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN desired_brand TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_ip_masked TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_ip_hash TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_ip_encrypted TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_country TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_region TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_city TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_user_agent TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_device_type TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_browser_name TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_cf_ray TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_consent_version TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_consented_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_recorded_at TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_phone_verified INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];
@@ -1002,6 +1082,85 @@ async function getCustomerQuotes(env) {
   }
 
   return json({ ok: true, rows });
+}
+
+async function ensureQuoteAuditAccessLogTable(env) {
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS quote_audit_access_logs (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_token_hash TEXT NOT NULL,
+      requester_ip_masked TEXT DEFAULT '',
+      requester_ip_hash TEXT DEFAULT '',
+      viewed_at TEXT NOT NULL
+    )`),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_quote_audit_access_quote_time ON quote_audit_access_logs(quote_id, viewed_at DESC)"),
+  ]);
+}
+
+async function revealQuoteSubmissionAudit(env, request, quoteId) {
+  await ensureCustomerQuoteColumns(env);
+  await ensureQuoteAuditAccessLogTable(env);
+  const body = await request.json().catch(() => ({}));
+  const reason = String(body.reason || "").trim().slice(0, 500);
+  if (reason.length < 5) {
+    return json({ ok: false, message: "원본 IP 조회 사유를 5자 이상 입력해주세요." }, 400);
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT id, quote_number, submission_ip_masked, submission_ip_hash, submission_ip_encrypted,
+            submission_country, submission_region, submission_city, submission_user_agent,
+            submission_device_type, submission_browser_name, submission_cf_ray,
+            submission_consent_version, submission_consented_at, submission_recorded_at,
+            submission_phone_verified
+       FROM customer_quotes WHERE id = ? LIMIT 1`
+  ).bind(quoteId).first();
+  if (!row) return json({ ok: false, message: "고객 견적을 찾을 수 없습니다." }, 404);
+  if (!row.submission_recorded_at && !row.submission_ip_hash) {
+    return json({ ok: false, message: "감사기록 도입 이전 견적으로 접수기록이 없습니다." }, 404);
+  }
+
+  const requesterIp = getClientIp(request);
+  const requesterSalt = String(env.QUOTE_AUDIT_HASH_SALT || env.ADMIN_API_TOKEN || "ga-pick-quote-audit-v1");
+  const tokenHash = await sha256Hex(String(request.headers.get("X-Admin-Token") || ""));
+  const requesterIpHash = await sha256Hex(`${requesterSalt}|${requesterIp}`);
+  const viewedAt = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO quote_audit_access_logs
+      (id, quote_id, reason, admin_token_hash, requester_ip_masked, requester_ip_hash, viewed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    createId("quote-audit-view"),
+    quoteId,
+    reason,
+    tokenHash,
+    maskClientIp(requesterIp),
+    requesterIpHash,
+    viewedAt
+  ).run();
+
+  return json({
+    ok: true,
+    audit: {
+      quoteNumber: row.quote_number || "",
+      exactIp: await decryptQuoteAuditValue(env, row.submission_ip_encrypted),
+      ipMasked: row.submission_ip_masked || "",
+      country: row.submission_country || "",
+      region: row.submission_region || "",
+      city: row.submission_city || "",
+      userAgent: row.submission_user_agent || "",
+      deviceType: row.submission_device_type || "",
+      browserName: row.submission_browser_name || "",
+      cfRay: row.submission_cf_ray || "",
+      consentVersion: row.submission_consent_version || "",
+      consentedAt: row.submission_consented_at || "",
+      recordedAt: row.submission_recorded_at || "",
+      phoneVerified: Number(row.submission_phone_verified || 0) === 1,
+      locationNotice: "IP 기반 접속지역은 참고 정보이며 실제 주소와 다를 수 있습니다.",
+      viewedAt,
+    },
+  });
 }
 
 async function getDeletedQuoteLogs(env) {
@@ -1725,6 +1884,9 @@ export async function onRequest(context) {
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
+  if (path.startsWith("customer-quotes/") && path.endsWith("/submission-audit") && method === "POST") {
+    return revealQuoteSubmissionAudit(env, request, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
   if (path === "deleted-quote-logs" && method === "GET") return getDeletedQuoteLogs(env);
   if (path === "lplan-training-quotes" && method === "GET") return getLplanTrainingQuotes(env, request);
   if (path === "visit-stats" && method === "GET") return getSiteVisitStats(env);

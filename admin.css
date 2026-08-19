@@ -1979,7 +1979,74 @@ body[data-admin-page="approvedSellers"] .table-actions .small-btn {
   }
 }
 
+.quote-audit-panel {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #cbd8e6;
+  border-left: 4px solid #174873;
+  background: #f5f8fb;
+}
+
+.quote-audit-panel.is-empty {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #64748b;
+}
+
+.quote-audit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.quote-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.quote-audit-grid span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #334155;
+}
+
+.quote-audit-grid b {
+  display: block;
+  margin-bottom: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quote-audit-panel > p {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quote-audit-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid #efc8c8;
+  background: #fff7f7;
+  color: #7f1d1d;
+}
+
+.quote-audit-reveal[hidden] {
+  display: none;
+}
+
 @media (max-width: 760px) {
+  .quote-audit-grid {
+    grid-template-columns: 1fr;
+  }
+
   .admin-shell {
     gap: 14px;
     padding:

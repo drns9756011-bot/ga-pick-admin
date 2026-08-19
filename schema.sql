@@ -87,7 +87,21 @@ CREATE TABLE IF NOT EXISTS customer_quotes (
   selected_bid_id TEXT DEFAULT '',
   sale_completed_at TEXT DEFAULT '',
   created_at TEXT NOT NULL,
-  consent_json TEXT DEFAULT '{}'
+  consent_json TEXT DEFAULT '{}',
+  submission_ip_masked TEXT DEFAULT '',
+  submission_ip_hash TEXT DEFAULT '',
+  submission_ip_encrypted TEXT DEFAULT '',
+  submission_country TEXT DEFAULT '',
+  submission_region TEXT DEFAULT '',
+  submission_city TEXT DEFAULT '',
+  submission_user_agent TEXT DEFAULT '',
+  submission_device_type TEXT DEFAULT '',
+  submission_browser_name TEXT DEFAULT '',
+  submission_cf_ray TEXT DEFAULT '',
+  submission_consent_version TEXT DEFAULT '',
+  submission_consented_at TEXT DEFAULT '',
+  submission_recorded_at TEXT DEFAULT '',
+  submission_phone_verified INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_quotes_quote_number ON customer_quotes(quote_number);
