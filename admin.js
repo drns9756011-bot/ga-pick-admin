@@ -1857,7 +1857,7 @@ function quoteSubmissionAuditSummary(quote) {
         <span><b>기기</b>${escapeHTML([audit.deviceType, audit.browserName].filter(Boolean).join(" · ") || "확인 불가")}</span>
         <span><b>요청 ID</b>${escapeHTML(audit.cfRay || "확인 불가")}</span>
         <span><b>동의기록</b>${escapeHTML(audit.consentVersion || "버전 미기록")} · ${escapeHTML(audit.consentedAt ? formatDate(audit.consentedAt) : "시각 미기록")}</span>
-        <span><b>휴대전화 인증</b>${audit.phoneVerified ? "인증 완료" : "미인증"}</span>
+        <span><b>휴대전화 인증</b>${audit.phoneVerified ? `인증 완료 · ${escapeHTML(audit.phoneVerifiedAt ? formatDate(audit.phoneVerifiedAt) : "시각 미기록")}` : "미인증"}</span>
       </div>
       <p>IP 기반 지역은 참고 정보이며 실제 주소와 다를 수 있습니다.</p>
       <div class="quote-audit-reveal" data-quote-audit-result="${escapeHTML(quote.id)}" hidden></div>

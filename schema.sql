@@ -101,11 +101,34 @@ CREATE TABLE IF NOT EXISTS customer_quotes (
   submission_consent_version TEXT DEFAULT '',
   submission_consented_at TEXT DEFAULT '',
   submission_recorded_at TEXT DEFAULT '',
-  submission_phone_verified INTEGER NOT NULL DEFAULT 0
+  submission_phone_verified INTEGER NOT NULL DEFAULT 0,
+  submission_phone_verification_id TEXT DEFAULT '',
+  submission_phone_verified_at TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_quotes_quote_number ON customer_quotes(quote_number);
 CREATE INDEX IF NOT EXISTS idx_customer_quotes_phone ON customer_quotes(phone);
+
+CREATE TABLE IF NOT EXISTS quote_phone_verifications (
+  id TEXT PRIMARY KEY,
+  phone_hash TEXT NOT NULL,
+  phone_masked TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  token_hash TEXT DEFAULT '',
+  request_ip_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  token_expires_at TEXT DEFAULT '',
+  requested_at TEXT NOT NULL,
+  verified_at TEXT DEFAULT '',
+  consumed_at TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_phone_verifications_phone_time
+  ON quote_phone_verifications(phone_hash, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quote_phone_verifications_ip_time
+  ON quote_phone_verifications(request_ip_hash, requested_at DESC);
 
 CREATE TABLE IF NOT EXISTS quote_images (
   id TEXT PRIMARY KEY,

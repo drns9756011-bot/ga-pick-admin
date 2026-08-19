@@ -495,6 +495,8 @@ function normalizeCustomerQuote(row, images = []) {
       consentedAt: row.submission_consented_at || "",
       recordedAt: row.submission_recorded_at || "",
       phoneVerified: Number(row.submission_phone_verified || 0) === 1,
+      phoneVerificationId: row.submission_phone_verification_id || "",
+      phoneVerifiedAt: row.submission_phone_verified_at || "",
       exactIpAvailable: Boolean(row.submission_ip_encrypted),
     },
     image: displayImages[0]?.url || row.thumbnail_image || "",
@@ -1032,6 +1034,8 @@ async function ensureCustomerQuoteColumns(env) {
     "ALTER TABLE customer_quotes ADD COLUMN submission_consented_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN submission_recorded_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN submission_phone_verified INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_phone_verification_id TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN submission_phone_verified_at TEXT DEFAULT ''",
     "ALTER TABLE quote_images ADD COLUMN image_type TEXT DEFAULT 'full'",
     "ALTER TABLE quote_images ADD COLUMN expires_at TEXT DEFAULT ''",
   ];
