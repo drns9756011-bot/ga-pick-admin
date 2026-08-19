@@ -3173,3 +3173,66 @@ tbody tr:hover td {
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* Customer quote workspace final overrides. */
+body[data-admin-page="customers"] .admin-shell {
+  gap: 14px;
+}
+
+body[data-admin-page="customers"] .admin-header {
+  min-height: 0;
+  padding: 17px 22px;
+}
+
+body[data-admin-page="customers"] .admin-header h1 {
+  font-size: 25px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+body[data-admin-page="customers"] .header-copy {
+  margin-top: 5px;
+}
+
+body[data-admin-page="customers"] .stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+body[data-admin-page="customers"] .stat-card {
+  min-height: 88px;
+  padding: 13px 16px;
+}
+
+body[data-admin-page="customers"] .stat-card strong {
+  margin-top: 5px;
+  font-size: 23px;
+}
+
+body[data-admin-page="customers"] .stat-card p {
+  margin-top: 3px;
+}
+
+body[data-admin-page="customers"] .customer-quote-admin-panel .panel-head {
+  padding: 17px 22px;
+}
+
+body[data-admin-page="customers"] .customer-quote-search {
+  padding-top: 14px;
+}
+
+@media (max-width: 1080px) {
+  body[data-admin-page="customers"] .admin-header h1 {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 760px) {
+  body[data-admin-page="customers"] .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body[data-admin-page="customers"] .stat-card {
+    min-height: 84px;
+  }
+}

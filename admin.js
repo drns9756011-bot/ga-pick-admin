@@ -107,8 +107,8 @@ const ADMIN_PAGE_CONFIG = {
   customers: {
     path: "/customers",
     title: "고객 견적",
-    heading: "고객 견적을 확인하고 필요한 정보를 수정하세요.",
-    copy: "서버에 저장된 고객 견적, 선택 상태, 삭제 이력을 관리합니다.",
+    heading: "고객 견적 관리",
+    copy: "등록 견적과 제안 선택 상태, 접속기록, 삭제 이력을 확인합니다.",
     visible: ["statGrid", "customerQuotePanel"],
   },
   sellers: {
@@ -1446,7 +1446,7 @@ function renderStats() {
   const todaySellerLogins = Number(sellerAccessStats.today?.loginCount || 0);
   const weekSellerAccess = Number(sellerAccessStats.last7Days?.sellerCount || 0);
 
-  statGrid.innerHTML = [
+  const dashboardStats = [
     {
       label: "노출용 방문자",
       value: `오늘 ${todayVisitors.toLocaleString("ko-KR")}명`,
@@ -1465,7 +1465,16 @@ function renderStats() {
     { label: "판매자 접속", value: `오늘 ${todaySellerAccess}명`, note: `오늘 로그인 ${todaySellerLogins}회 · 최근 7일 ${weekSellerAccess}명`, action: "seller-access" },
     { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
-  ]
+  ];
+  const customerStats = [
+    { label: "전체 견적", value: `${quoteSummary.total}건`, note: "서버 누적 등록" },
+    { label: "진행 중", value: `${quoteSummary.active}건`, note: "제안 접수 가능" },
+    { label: "종료 견적", value: `${quoteSummary.closed}건`, note: "시간 종료·선택 완료" },
+    { label: "미선택", value: `${quoteSummary.unselected}건`, note: "판매자 미선택 견적" },
+  ];
+  const stats = getCurrentAdminPageKey() === "customers" ? customerStats : dashboardStats;
+
+  statGrid.innerHTML = stats
     .map((stat) => {
       const interactive = Boolean(stat.action);
       return `
