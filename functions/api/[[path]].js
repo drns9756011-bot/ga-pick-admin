@@ -374,6 +374,7 @@ function normalizeMessage(row) {
     solapiMessageId: row.solapi_message_id || "",
     errorMessage: row.error_message || "",
     solapiResponse: parseJson(row.solapi_response_json, null),
+    scheduledAt: row.scheduled_at || "",
     createdAt: row.created_at || "",
     sentAt: row.sent_at || "",
     canceledAt: row.canceled_at || "",
@@ -527,6 +528,7 @@ async function ensureAlimtalkColumns(env) {
         solapi_message_id TEXT DEFAULT '',
         error_message TEXT DEFAULT '',
         solapi_response_json TEXT DEFAULT '',
+        scheduled_at TEXT DEFAULT '',
         created_at TEXT NOT NULL,
         sent_at TEXT DEFAULT '',
         canceled_at TEXT DEFAULT ''
@@ -543,6 +545,8 @@ async function ensureAlimtalkColumns(env) {
     "ALTER TABLE alimtalk_queue ADD COLUMN solapi_message_id TEXT DEFAULT ''",
     "ALTER TABLE alimtalk_queue ADD COLUMN error_message TEXT DEFAULT ''",
     "ALTER TABLE alimtalk_queue ADD COLUMN solapi_response_json TEXT DEFAULT ''",
+    "ALTER TABLE alimtalk_queue ADD COLUMN scheduled_at TEXT DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_alimtalk_queue_scheduled ON alimtalk_queue(status, scheduled_at)",
   ];
 
   for (const statement of statements) {
@@ -572,6 +576,7 @@ async function insertAlimtalkRow(env, row) {
     solapi_message_id: "",
     error_message: "",
     solapi_response_json: "",
+    scheduled_at: row.scheduledAt || "",
     created_at: row.createdAt,
     sent_at: "",
     canceled_at: "",
@@ -1308,6 +1313,17 @@ async function resendAlimtalk(env, id) {
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
   if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
+  if (
+    row.status === "scheduled" &&
+    row.scheduledAt &&
+    new Date(row.scheduledAt).getTime() > Date.now()
+  ) {
+    return json({
+      ok: false,
+      message: "오전 9시 예약 발송 전에는 재발송할 수 없습니다.",
+      scheduledAt: row.scheduledAt,
+    }, 409);
+  }
 
   const templateId = row.templateId || getSolapiTemplateId(env, row.type || "notice");
   const result = await sendSolapiAlimtalk(env, row, templateId).catch((error) => ({

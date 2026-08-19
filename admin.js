@@ -682,24 +682,46 @@ async function loadAdminDataFromServer(options = {}) {
     return { ok: false, message: "관리자 API 토큰이 필요합니다." };
   }
   if (!silent) {
-    setAdminLoading(true, "관리자 데이터를 한 번에 불러오는 중입니다.", "최신 운영 정보와 방문자 통계를 확인하고 있습니다.");
+    setAdminLoading(true, "현재 화면 데이터를 불러오는 중입니다.", "필요한 최신 운영 정보만 확인하고 있습니다.");
   }
 
   try {
     const requestOptions = { silent: true };
-    const results = await Promise.all([
-      loadSellerApplicationsFromServer(requestOptions),
-      loadApprovedSellersFromServer(requestOptions),
-      loadAlimtalkMessagesFromServer(requestOptions),
-      loadCustomerQuotesFromServer(requestOptions),
-      apiJson("/api/deleted-quote-logs", requestOptions),
-      loadLplanTrainingFromServer({ silent: true, limit: 100 }),
-      loadVisitStatsFromServer(requestOptions),
-      loadSellerAccessLogsFromServer({ silent: true }),
-      loadBrandHallFromServer({ silent: true }),
-    ]);
-
-    const [applications, approvedSellers, messages, customerQuotes, deletedQuoteLogs, lplanTraining, visitStats, sellerAccess, brandHall] = results;
+    const loaders = {
+      applications: () => loadSellerApplicationsFromServer(requestOptions),
+      approvedSellers: () => loadApprovedSellersFromServer(requestOptions),
+      messages: () => loadAlimtalkMessagesFromServer(requestOptions),
+      customerQuotes: () => loadCustomerQuotesFromServer(requestOptions),
+      deletedQuoteLogs: () => apiJson("/api/deleted-quote-logs", requestOptions),
+      lplanTraining: () => loadLplanTrainingFromServer({ silent: true, limit: 100 }),
+      visitStats: () => loadVisitStatsFromServer(requestOptions),
+      sellerAccess: () => loadSellerAccessLogsFromServer({ silent: true }),
+      brandHall: () => loadBrandHallFromServer({ silent: true }),
+    };
+    const scopeKeys = {
+      dashboard: Object.keys(loaders),
+      customers: ["customerQuotes", "deletedQuoteLogs"],
+      sellers: ["applications"],
+      approvedSellers: ["approvedSellers"],
+      brandHall: ["approvedSellers", "brandHall"],
+      sellerAccess: ["sellerAccess"],
+      alimtalk: ["messages"],
+    };
+    const requestedKeys = scopeKeys[getCurrentAdminPageKey()] || scopeKeys.dashboard;
+    const resolvedEntries = await Promise.all(
+      requestedKeys.map(async (key) => [key, await loaders[key]()])
+    );
+    const resultMap = Object.fromEntries(resolvedEntries);
+    const results = resolvedEntries.map(([, result]) => result);
+    const applications = resultMap.applications;
+    const approvedSellers = resultMap.approvedSellers;
+    const messages = resultMap.messages;
+    const customerQuotes = resultMap.customerQuotes;
+    const deletedQuoteLogs = resultMap.deletedQuoteLogs;
+    const lplanTraining = resultMap.lplanTraining;
+    const visitStats = resultMap.visitStats;
+    const sellerAccess = resultMap.sellerAccess;
+    const brandHall = resultMap.brandHall;
     const authFailure = results.find((result) =>
       result && result.ok === false && [401, 503].includes(Number(result.status || 0))
     );
@@ -1249,6 +1271,7 @@ function statusLabel(status) {
     approved: "승인",
     rejected: "반려",
     ready: "발송 대기",
+    scheduled: "오전 9시 예약",
     accepted: "접수됨",
     sending: "전송중",
     sent: "발송완료",
@@ -1300,6 +1323,9 @@ async function queueAlimtalk(message) {
 function getFilteredMessages() {
   return getMessages().filter((message) => {
     if (messageFilter === "all") return true;
+    if (messageFilter === "ready") {
+      return message.status === "ready" || message.status === "scheduled";
+    }
     if (messageFilter === "accepted") {
       return message.status === "accepted" || message.status === "sending";
     }
@@ -1407,7 +1433,7 @@ function renderStats() {
   const customerQuotes = getCustomerQuotes();
   const quoteSummary = summarizeCustomerQuotes(customerQuotes);
   const pendingCount = applications.filter((row) => row.status === "pending").length;
-  const readyMessages = messages.filter((row) => row.status === "ready" || row.status === "sending" || row.status === "accepted").length;
+  const readyMessages = messages.filter((row) => row.status === "ready" || row.status === "scheduled" || row.status === "sending" || row.status === "accepted").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
   const visitStats = getVisitStats();
@@ -2010,6 +2036,7 @@ function renderMessages() {
   messageList.innerHTML = messages.length
     ? messages.map((message) => {
       const solapiSummary = summarizeSolapiResponse(message);
+      const isFutureScheduled = message.status === "scheduled" && message.scheduledAt && new Date(message.scheduledAt).getTime() > Date.now();
       return `
         <article class="message-card">
           <div class="message-top">
@@ -2023,9 +2050,9 @@ function renderMessages() {
           <p class="meta-line">템플릿 ${escapeHTML(message.templateId || "미지정")}</p>
           ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
           ${solapiSummary ? `<p class="meta-line">솔라피 응답: ${escapeHTML(solapiSummary)}</p>` : ""}
-          <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
+          <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.scheduledAt ? ` · 예약 ${escapeHTML(formatDate(message.scheduledAt))}` : ""}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
           <div class="message-actions">
-            <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}">재발송 요청</button>
+            <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}" ${isFutureScheduled ? "disabled title=\"예약 발송 시각 이후에 사용할 수 있습니다.\"" : ""}>${isFutureScheduled ? "예약 대기" : "재발송 요청"}</button>
             <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}">상태 확인</button>
             <button class="danger-btn small-btn" type="button" data-delete-message="${escapeHTML(message.id)}">삭제</button>
           </div>
@@ -2769,7 +2796,7 @@ refreshBtn.addEventListener("click", async () => {
   refreshBtn.textContent = "갱신 중";
   try {
     const result = await loadAdminDataFromServer();
-    if (result?.ok) showToast("관리자 데이터를 한 번에 다시 불러왔습니다.");
+    if (result?.ok) showToast("현재 화면의 서버 데이터를 다시 불러왔습니다.");
   } finally {
     refreshBtn.disabled = false;
     refreshBtn.textContent = "새로고침";

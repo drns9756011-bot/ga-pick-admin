@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS alimtalk_queue (
   solapi_message_id TEXT DEFAULT '',
   error_message TEXT DEFAULT '',
   solapi_response_json TEXT DEFAULT '',
+  scheduled_at TEXT DEFAULT '',
   created_at TEXT NOT NULL,
   sent_at TEXT DEFAULT '',
   canceled_at TEXT DEFAULT ''
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS alimtalk_queue (
 
 CREATE INDEX IF NOT EXISTS idx_alimtalk_queue_status ON alimtalk_queue(status);
 CREATE INDEX IF NOT EXISTS idx_alimtalk_queue_related_id ON alimtalk_queue(related_id);
+CREATE INDEX IF NOT EXISTS idx_alimtalk_queue_scheduled ON alimtalk_queue(status, scheduled_at);
 
 CREATE TABLE IF NOT EXISTS customer_quotes (
   id TEXT PRIMARY KEY,

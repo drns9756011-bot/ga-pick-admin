@@ -999,6 +999,7 @@ button.application-card.is-active {
 
 .status.pending,
 .status.ready,
+.status.scheduled,
 .status.accepted,
 .status.sending {
   background: #fff4dc;
