@@ -5,8 +5,6 @@
   "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
 };
 
-import { read as readWorkbook, utils as workbookUtils } from "xlsx";
-
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
   SOLAPI_FROM: "01066312323",
@@ -1473,137 +1471,126 @@ async function getActiveSubscriptionImageMap(env) {
   return images;
 }
 
-export function parseSubscriptionWorkbook(arrayBuffer, imageMap) {
-  const workbook = readWorkbook(arrayBuffer, { type: "array", cellDates: false });
-  const worksheet = workbook.Sheets["전자랜드"];
-  if (!worksheet) throw new Error("전자랜드 시트를 찾을 수 없습니다.");
-  const rows = workbookUtils.sheet_to_json(worksheet, { header: 1, raw: true, defval: "" });
-  const groups = new Map();
-
-  rows.slice(1).forEach((row) => {
-    const contractMonths = String(row[7] ?? "").trim();
-    const bundleType = String(row[8] ?? "").trim();
-    const model = String(row[1] ?? "").trim().toUpperCase();
-    const monthlyFee72 = Math.round(Number(String(row[12] ?? "").replaceAll(",", "")));
-    if (contractMonths !== "72" || bundleType !== "결합없음" || !model || monthlyFee72 <= 0) return;
-
-    const sourceCategory = String(row[0] ?? "").trim();
-    const category = SUBSCRIPTION_CATEGORY_MAP[sourceCategory] || "생활가전";
-    let groupModel = model;
-    let installationType = "";
-    if (category === "TV") {
-      const dotIndex = model.indexOf(".");
-      const modelBody = dotIndex >= 0 ? model.slice(0, dotIndex) : model;
-      const suffix = dotIndex >= 0 ? model.slice(dotIndex) : "";
-      const match = /^(.*)([SW])$/.exec(modelBody);
-      if (match) {
-        groupModel = `${match[1]}${suffix}`;
-        installationType = match[2] === "S" ? "스탠드형" : "벽걸이형";
-      }
-    }
-    const careType = String(row[4] ?? "").trim();
-    const careDetail = String(row[5] ?? "").trim();
-    const visitCycle = String(row[6] ?? "").trim();
-    const label = [installationType, careType, careDetail, visitCycle ? `${visitCycle} 주기` : ""].filter(Boolean).join(" · ") || model;
-    const option = { label, model, installationType, careType, careDetail, visitCycle, monthlyFee72 };
-    const groupKey = `${category}|${groupModel}`;
-    if (!groups.has(groupKey)) groups.set(groupKey, {
-      brand: "LG전자", category, sourceCategory, model: groupModel, name: `LG ${sourceCategory}`,
-      monthlyFee72: 0, careType: "", careDetail: "", visitCycle: "", imageUrl: "", optionMap: new Map(),
-    });
-    const group = groups.get(groupKey);
-    const optionKey = `${model}|${installationType}|${careType}|${careDetail}|${visitCycle}`;
-    const previous = group.optionMap.get(optionKey);
-    if (!previous || option.monthlyFee72 < previous.monthlyFee72) group.optionMap.set(optionKey, option);
-  });
-
-  const items = [...groups.values()].map((group) => {
-    const options = [...group.optionMap.values()].sort((a, b) =>
-      a.monthlyFee72 - b.monthlyFee72
-        || a.installationType.localeCompare(b.installationType, "ko")
-        || a.careType.localeCompare(b.careType, "ko")
-        || a.model.localeCompare(b.model, "en")
-    );
-    const primary = options[0];
-    return {
-      ...group,
-      monthlyFee72: primary.monthlyFee72,
-      careType: primary.careType,
-      careDetail: primary.careDetail,
-      visitCycle: primary.visitCycle,
-      imageUrl: imageMap.get(primary.model) || imageMap.get(group.model) || "",
-      options,
-      optionMap: undefined,
-    };
-  }).sort((a, b) =>
-    a.category.localeCompare(b.category, "ko")
-      || a.sourceCategory.localeCompare(b.sourceCategory, "ko")
-      || a.model.localeCompare(b.model, "en")
-  );
-  if (!items.length || items.length > 3000) throw new Error("72개월·결합없음 상품을 1~3,000개 범위에서 찾을 수 없습니다.");
-  return items;
+function normalizeSubscriptionImportText(value, maxLength = 160) {
+  return String(value || "").trim().slice(0, maxLength);
 }
 
-async function replaceSubscriptionProductsFromUpload(env, items) {
-  const now = new Date().toISOString();
+function normalizeSubscriptionImportItem(raw, imageMap) {
+  const model = normalizeSubscriptionImportText(raw?.model, 100).toUpperCase();
+  const category = normalizeSubscriptionImportText(raw?.category, 50);
+  const monthlyFee72 = Math.max(0, Math.round(Number(raw?.monthlyFee72 || 0)));
+  if (!model || !category || monthlyFee72 <= 0) throw new Error("모델명, 품목, 72개월 구독료가 올바르지 않은 상품이 있습니다.");
+  const options = (Array.isArray(raw?.options) ? raw.options : []).slice(0, 40).map((option) => ({
+    label: normalizeSubscriptionImportText(option?.label, 240),
+    model: normalizeSubscriptionImportText(option?.model, 100).toUpperCase(),
+    installationType: normalizeSubscriptionImportText(option?.installationType, 40),
+    careType: normalizeSubscriptionImportText(option?.careType, 80),
+    careDetail: normalizeSubscriptionImportText(option?.careDetail, 160),
+    visitCycle: normalizeSubscriptionImportText(option?.visitCycle, 80),
+    monthlyFee72: Math.max(0, Math.round(Number(option?.monthlyFee72 || 0))),
+  })).filter((option) => option.model && option.monthlyFee72 > 0);
+  if (!options.length) throw new Error(`${model} 모델의 구독 옵션이 없습니다.`);
+  const primary = options.reduce((lowest, option) => option.monthlyFee72 < lowest.monthlyFee72 ? option : lowest, options[0]);
+  const submittedImageUrl = normalizeSubscriptionImportText(raw?.imageUrl, 1200);
+  const safeSubmittedImageUrl = /^(?:https:\/\/|\/api\/files\/)/i.test(submittedImageUrl) ? submittedImageUrl : "";
+  return {
+    brand: "LG전자",
+    category,
+    sourceCategory: normalizeSubscriptionImportText(raw?.sourceCategory, 80),
+    model,
+    name: normalizeSubscriptionImportText(raw?.name, 160) || `LG ${category}`,
+    monthlyFee72: primary.monthlyFee72,
+    careType: primary.careType,
+    careDetail: primary.careDetail,
+    visitCycle: primary.visitCycle,
+    imageUrl: safeSubmittedImageUrl || imageMap.get(primary.model) || imageMap.get(model) || "",
+    options,
+  };
+}
+
+async function startSubscriptionProductImport(env) {
+  await ensureSubscriptionProductSchema(env);
+  const staging = await env.DB.prepare("SELECT id FROM subscription_product_sets WHERE status = 'staging'").all();
+  for (const row of staging.results || []) {
+    await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(row.id).run();
+    await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ?").bind(row.id).run();
+  }
   const setId = createId("subscription-set");
+  const now = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO subscription_product_sets
       (id, status, source_name, source_date, product_count, created_at, activated_at)
-     VALUES (?, 'staging', '구독 상품 데이터', ?, ?, ?, '')`
-  ).bind(setId, adminTodayKey(), items.length, now).run();
+     VALUES (?, 'staging', '구독 상품 데이터', ?, 0, ?, '')`
+  ).bind(setId, adminTodayKey(), now).run();
+  const imageMap = await getActiveSubscriptionImageMap(env);
+  return json({ ok: true, setId, chunkSize: 60, imageMap: Object.fromEntries(imageMap), originalFileStored: false });
+}
 
-  try {
-    for (let offset = 0; offset < items.length; offset += 75) {
-      await env.DB.batch(items.slice(offset, offset + 75).map((item, localIndex) => env.DB.prepare(
-        `INSERT INTO subscription_products
-          (id, set_id, brand, category, source_category, model, name, monthly_fee_72,
-           care_type, care_detail, visit_cycle, image_url, options_json, sort_order, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        createId("subscription-product"), setId, item.brand, item.category, item.sourceCategory,
-        item.model, item.name, item.monthlyFee72, item.careType, item.careDetail, item.visitCycle,
-        item.imageUrl, JSON.stringify(item.options || []), offset + localIndex, now
-      )));
-    }
-    await env.DB.batch([
-      env.DB.prepare("UPDATE subscription_product_sets SET status = 'archived' WHERE status = 'active'"),
-      env.DB.prepare("UPDATE subscription_product_sets SET status = 'active', activated_at = ? WHERE id = ?").bind(now, setId),
-    ]);
-  } catch (error) {
-    await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(setId).run().catch(() => {});
-    await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ?").bind(setId).run().catch(() => {});
-    throw error;
+async function appendSubscriptionProductImportChunk(env, request, setId) {
+  await ensureSubscriptionProductSchema(env);
+  const set = await env.DB.prepare("SELECT id FROM subscription_product_sets WHERE id = ? AND status = 'staging'").bind(setId).first();
+  if (!set) return json({ ok: false, message: "진행 중인 구독 상품 갱신 작업을 찾을 수 없습니다." }, 404);
+  const body = await request.json().catch(() => ({}));
+  const sourceItems = Array.isArray(body.items) ? body.items : [];
+  if (!sourceItems.length || sourceItems.length > 60) return json({ ok: false, message: "상품은 한 번에 1~60개씩 전송해야 합니다." }, 400);
+  const items = sourceItems.map((item) => normalizeSubscriptionImportItem(item, new Map()));
+  const offset = Math.max(0, Math.floor(Number(body.offset || 0)));
+  const now = new Date().toISOString();
+  await env.DB.batch(items.map((item, index) => env.DB.prepare(
+    `INSERT OR REPLACE INTO subscription_products
+      (id, set_id, brand, category, source_category, model, name, monthly_fee_72,
+       care_type, care_detail, visit_cycle, image_url, options_json, sort_order, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    createId("subscription-product"), setId, item.brand, item.category, item.sourceCategory,
+    item.model, item.name, item.monthlyFee72, item.careType, item.careDetail, item.visitCycle,
+    item.imageUrl, JSON.stringify(item.options), offset + index, now
+  )));
+  return json({ ok: true, setId, received: items.length, nextOffset: offset + items.length });
+}
+
+async function commitSubscriptionProductImport(env, request, setId) {
+  await ensureSubscriptionProductSchema(env);
+  const body = await request.json().catch(() => ({}));
+  const expectedCount = Math.max(0, Math.floor(Number(body.expectedCount || 0)));
+  const set = await env.DB.prepare("SELECT id FROM subscription_product_sets WHERE id = ? AND status = 'staging'").bind(setId).first();
+  if (!set) return json({ ok: false, message: "완료할 구독 상품 갱신 작업을 찾을 수 없습니다." }, 404);
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM subscription_products WHERE set_id = ?").bind(setId).first();
+  const count = Number(countRow?.count || 0);
+  if (!count || count > 3000 || count !== expectedCount) {
+    return json({ ok: false, message: `상품 저장 건수가 일치하지 않습니다. 예정 ${expectedCount}개, 서버 ${count}개` }, 409);
   }
-
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE subscription_product_sets SET status = 'archived' WHERE status = 'active'"),
+    env.DB.prepare("UPDATE subscription_product_sets SET status = 'active', product_count = ?, activated_at = ? WHERE id = ? AND status = 'staging'").bind(count, now, setId),
+  ]);
   const archived = await env.DB.prepare("SELECT id FROM subscription_product_sets WHERE status = 'archived'").all();
   for (const row of archived.results || []) {
     await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(row.id).run();
     await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ?").bind(row.id).run();
   }
-  return { setId, count: items.length, activatedAt: now };
+  return json({ ok: true, setId, count, activatedAt: now, originalFileStored: false, previousDataDeleted: true });
 }
 
-async function uploadSubscriptionWorkbook(env, request) {
-  const denied = requireAdmin(request, env);
-  if (denied) return denied;
+async function cancelSubscriptionProductImport(env, setId) {
   await ensureSubscriptionProductSchema(env);
-  const contentLength = Number(request.headers.get("Content-Length") || 0);
-  if (contentLength > 16 * 1024 * 1024) return json({ ok: false, message: "엑셀 파일은 15MB 이하여야 합니다." }, 413);
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!(file instanceof File) || !file.name) return json({ ok: false, message: "업로드할 엑셀 파일을 선택해주세요." }, 400);
-  if (!/\.(xlsx|xlsm)$/i.test(file.name)) return json({ ok: false, message: "xlsx 또는 xlsm 파일만 업로드할 수 있습니다." }, 400);
-  if (file.size > 15 * 1024 * 1024) return json({ ok: false, message: "엑셀 파일은 15MB 이하여야 합니다." }, 413);
+  await env.DB.prepare("DELETE FROM subscription_products WHERE set_id = ?").bind(setId).run();
+  await env.DB.prepare("DELETE FROM subscription_product_sets WHERE id = ? AND status = 'staging'").bind(setId).run();
+  return json({ ok: true, setId });
+}
 
-  const bytes = await file.arrayBuffer();
-  const signature = new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength));
-  if (signature[0] !== 0x50 || signature[1] !== 0x4b) return json({ ok: false, message: "올바른 엑셀 파일이 아닙니다." }, 400);
-
-  const imageMap = await getActiveSubscriptionImageMap(env);
-  const items = parseSubscriptionWorkbook(bytes, imageMap);
-  const result = await replaceSubscriptionProductsFromUpload(env, items);
-  return json({ ok: true, ...result, originalFileStored: false, previousDataDeleted: true });
+async function handleSubscriptionImport(handler) {
+  try {
+    return await handler();
+  } catch (error) {
+    const detail = String(error?.message || "").trim();
+    return json({
+      ok: false,
+      code: "SUBSCRIPTION_IMPORT_FAILED",
+      message: detail ? `구독 상품 갱신에 실패했습니다: ${detail}` : "구독 상품 갱신 중 서버 오류가 발생했습니다.",
+    }, 500);
+  }
 }
 
 async function getSubscriptionUploadStatus(env, request) {
@@ -1673,8 +1660,17 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
-  if (path === "subscription-products/status" && method === "GET") return getSubscriptionUploadStatus(env, request);
-  if (path === "subscription-products/upload" && method === "POST") return uploadSubscriptionWorkbook(env, request);
+  if (path === "subscription-products/status" && method === "GET") return handleSubscriptionImport(() => getSubscriptionUploadStatus(env, request));
+  if (path === "subscription-products/import/start" && method === "POST") return handleSubscriptionImport(() => startSubscriptionProductImport(env));
+  if (path.startsWith("subscription-products/import/") && path.endsWith("/chunk") && method === "POST") {
+    return handleSubscriptionImport(() => appendSubscriptionProductImportChunk(env, request, decodeURIComponent(pathParts.slice(2, -1).join("/"))));
+  }
+  if (path.startsWith("subscription-products/import/") && path.endsWith("/commit") && method === "POST") {
+    return handleSubscriptionImport(() => commitSubscriptionProductImport(env, request, decodeURIComponent(pathParts.slice(2, -1).join("/"))));
+  }
+  if (path.startsWith("subscription-products/import/") && method === "DELETE") {
+    return handleSubscriptionImport(() => cancelSubscriptionProductImport(env, decodeURIComponent(pathParts.slice(2).join("/"))));
+  }
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
