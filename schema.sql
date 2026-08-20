@@ -181,15 +181,36 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 CREATE INDEX IF NOT EXISTS idx_reviews_seller_id ON reviews(seller_id);
 
-CREATE TABLE IF NOT EXISTS deleted_quote_logs (
+CREATE TABLE IF NOT EXISTS subscription_consultations (
   id TEXT PRIMARY KEY,
-  quote_id TEXT DEFAULT '',
-  quote_number TEXT DEFAULT '',
-  customer TEXT NOT NULL,
-  phone TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  deleted_at TEXT NOT NULL
+  product_model TEXT DEFAULT '',
+  product_name TEXT DEFAULT '',
+  option_model TEXT DEFAULT '',
+  option_label TEXT DEFAULT '',
+  monthly_fee_72 INTEGER DEFAULT 0,
+  customer_name TEXT NOT NULL,
+  customer_phone TEXT NOT NULL,
+  customer_region TEXT DEFAULT '',
+  preferred_time TEXT DEFAULT '',
+  memo TEXT DEFAULT '',
+  partner_name TEXT NOT NULL,
+  consent_version TEXT NOT NULL,
+  collection_consent_json TEXT NOT NULL DEFAULT '{}',
+  third_party_consent_json TEXT NOT NULL DEFAULT '{}',
+  consented_at TEXT NOT NULL,
+  phone_verification_id TEXT NOT NULL,
+  phone_verified_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  delivery_error TEXT DEFAULT '',
+  contract_amount INTEGER DEFAULT 0,
+  commission_amount INTEGER DEFAULT 0,
+  settlement_status TEXT DEFAULT 'unsettled',
+  admin_memo TEXT DEFAULT '',
+  settled_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at);
-
+CREATE INDEX IF NOT EXISTS idx_subscription_consultations_created
+  ON subscription_consultations(created_at DESC);

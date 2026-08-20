@@ -3,7 +3,6 @@ const STORAGE_KEYS = {
   approvedSellers: "pickquoteApprovedSellers",
   alimtalkQueue: "pickquoteAlimtalkQueue",
   customerQuotes: "pickquoteCustomerQuotes",
-  deletedQuoteLogs: "pickquoteDeletedQuoteLogs",
   lplanTrainingQuotes: "pickquoteLplanTrainingQuotes",
   visitStats: "pickquoteVisitStats",
   sellerAccessLogs: "pickquoteSellerAccessLogs",
@@ -14,6 +13,7 @@ const STORAGE_KEYS = {
   brandConsultations: "pickquoteBrandConsultationsAdmin",
 };
 const PUBLIC_API_BASE = "https://ga-pick.com";
+localStorage.removeItem("pickquoteDeletedQuoteLogs");
 
 if (!document.querySelector('.side-nav a[href="/subscription-products"]')) {
   const adminSubscriptionLink = document.createElement("a");
@@ -108,7 +108,7 @@ const ADMIN_PAGE_CONFIG = {
     path: "/customers",
     title: "고객 견적",
     heading: "고객 견적 관리",
-    copy: "등록 견적과 제안 선택 상태, 접속기록, 삭제 이력을 확인합니다.",
+    copy: "등록 견적과 제안 선택 상태, 접속기록을 확인합니다.",
     visible: ["statGrid", "customerQuotePanel"],
   },
   sellers: {
@@ -263,17 +263,13 @@ customerQuoteSection.innerHTML = `
     <p id="customerQuoteSearchSummary" aria-live="polite">전체 견적을 표시합니다.</p>
   </div>
   <div class="quote-admin-list" id="customerQuoteList"></div>
-  <div class="deleted-quote-log">
-    <h3>삭제된 견적 기록</h3>
-    <div class="deleted-quote-list" id="deletedQuoteList"></div>
-  </div>
 `;
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
 const customerQuoteSearch = document.querySelector("#customerQuoteSearch");
 const customerQuoteSearchClear = document.querySelector("#customerQuoteSearchClear");
 const customerQuoteSearchSummary = document.querySelector("#customerQuoteSearchSummary");
-const deletedQuoteList = document.querySelector("#deletedQuoteList");
+const deletedQuoteList = null;
 
 const lplanSyncSection = document.createElement("section");
 lplanSyncSection.className = "admin-panel lplan-sync-panel";
@@ -664,7 +660,7 @@ function clearCurrentAdminData() {
   writeStorageArray(STORAGE_KEYS.approvedSellers, []);
   writeStorageArray(STORAGE_KEYS.alimtalkQueue, []);
   writeStorageArray(STORAGE_KEYS.customerQuotes, []);
-  writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, []);
+  localStorage.removeItem("pickquoteDeletedQuoteLogs");
   writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, []);
   writeStorageArray(STORAGE_KEYS.sellerAccessLogs, []);
   writeStorageArray(STORAGE_KEYS.brandPackages, []);
@@ -717,7 +713,6 @@ async function loadAdminDataFromServer(options = {}) {
     const approvedSellers = resultMap.approvedSellers;
     const messages = resultMap.messages;
     const customerQuotes = resultMap.customerQuotes;
-    const deletedQuoteLogs = resultMap.deletedQuoteLogs;
     const lplanTraining = resultMap.lplanTraining;
     const visitStats = resultMap.visitStats;
     const sellerAccess = resultMap.sellerAccess;
@@ -751,10 +746,6 @@ async function loadAdminDataFromServer(options = {}) {
       writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
       updatedCount += 1;
     }
-    if (deletedQuoteLogs?.ok && Array.isArray(deletedQuoteLogs.rows)) {
-      writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedQuoteLogs.rows);
-      updatedCount += 1;
-    }
     if (visitStats?.ok) {
       localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(visitStats));
       updatedCount += 1;
@@ -766,7 +757,11 @@ async function loadAdminDataFromServer(options = {}) {
     }
     if (brandHall?.ok) {
       if (Array.isArray(brandHall.packages)) writeStorageArray(STORAGE_KEYS.brandPackages, brandHall.packages);
-      if (Array.isArray(brandHall.consultations)) writeStorageArray(STORAGE_KEYS.brandConsultations, brandHall.consultations);
+      const consultations = [
+        ...(Array.isArray(brandHall.consultations) ? brandHall.consultations : []),
+        ...(Array.isArray(brandHall.subscriptionConsultations) ? brandHall.subscriptionConsultations : []),
+      ].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      writeStorageArray(STORAGE_KEYS.brandConsultations, consultations);
       updatedCount += 1;
     }
     if (lplanTraining?.ok && Array.isArray(lplanTraining.rows)) {
@@ -1065,12 +1060,9 @@ async function syncCustomerQuoteUpdateToServer(quoteId, payload) {
   return true;
 }
 
-async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
+async function syncCustomerQuoteDeleteToServer(quoteId) {
   const encodedId = encodeURIComponent(quoteId);
-  const request = {
-    method: "DELETE",
-    body: JSON.stringify({ reason }),
-  };
+  const request = { method: "DELETE" };
 
   const result = await apiJson(`/api/customer-quotes/${encodedId}`, request);
 
@@ -1084,10 +1076,7 @@ async function syncCustomerQuoteDeleteToServer(quoteId, reason) {
     getCustomerQuotes().filter((quote) => String(quote.id) !== String(quoteId))
   );
 
-  const deletedLogs = await apiJson(`/api/deleted-quote-logs?ts=${Date.now()}`, { silent: true });
-  if (deletedLogs?.ok && Array.isArray(deletedLogs.rows)) {
-    writeStorageArray(STORAGE_KEYS.deletedQuoteLogs, deletedLogs.rows);
-  }
+  localStorage.removeItem("pickquoteDeletedQuoteLogs");
   renderAll();
   return true;
 }
@@ -1139,10 +1128,6 @@ function setMessages(rows) {
 
 function getCustomerQuotes() {
   return readStorageArray(STORAGE_KEYS.customerQuotes);
-}
-
-function getDeletedQuoteLogs() {
-  return readStorageArray(STORAGE_KEYS.deletedQuoteLogs);
 }
 
 function getLplanTrainingQuotes() {
@@ -2068,24 +2053,7 @@ function renderLplanSyncPanel() {
     `;
 }
 
-function renderDeletedQuoteLogs() {
-  if (!deletedQuoteList) return;
-  const logs = getDeletedQuoteLogs();
-  deletedQuoteList.innerHTML = logs.length
-    ? logs.map((log) => `
-      <article class="deleted-log-row">
-        <strong>${escapeHTML(log.customer || "-")} · ${escapeHTML(formatPhoneNumber(log.phone))}</strong>
-        <span>${escapeHTML(log.reason || "삭제 사유 없음")}</span>
-        <small>${escapeHTML(formatDate(log.deletedAt || log.createdAt))}</small>
-      </article>
-    `).join("")
-    : `
-      <div class="empty-state small">
-        <strong>삭제된 견적 기록이 없습니다.</strong>
-        <p>관리자가 견적을 삭제하면 고객명, 연락처, 삭제 사유만 남습니다.</p>
-      </div>
-    `;
-}
+function renderDeletedQuoteLogs() {}
 
 function summarizeSolapiResponse(message) {
   if (!message?.solapiResponseJson) return "";
@@ -2183,23 +2151,12 @@ async function deleteApprovedSeller(sellerId) {
 async function deleteCustomerQuote(quoteId) {
   const quote = getCustomerQuotes().find((row) => row.id === quoteId);
   if (!quote) return;
-  const reason = await openAdminTextModal({
-    eyebrow: "Delete Quote",
-    title: "고객 견적 삭제",
-    description: `${quote.customer || "고객"}님의 견적을 서버에서 완전히 삭제합니다. 삭제 후에는 견적, 이미지, 제안, 후기를 복구할 수 없고 고객명, 연락처, 삭제 사유만 기록됩니다.`,
-    label: "삭제 사유",
-    multiline: true,
-    confirmText: "견적 삭제",
-    danger: true,
-  });
-  if (reason === null) return;
-  const trimmedReason = String(reason).trim();
-  if (trimmedReason.length < 2) {
-    showToast("삭제 사유를 입력해야 견적을 삭제할 수 있습니다.");
-    return;
-  }
-  const ok = await syncCustomerQuoteDeleteToServer(quoteId, trimmedReason);
-  showToast(ok ? "고객 견적을 삭제하고 사유를 기록했습니다." : "고객 견적 삭제에 실패했습니다.");
+  const confirmed = window.confirm(
+    `${quote.customer || "고객"}님의 견적과 관련 고객정보를 완전히 삭제할까요?\n이미지, 제안, 후기, 채팅, 인증 및 알림 기록까지 삭제되며 복구할 수 없습니다.`
+  );
+  if (!confirmed) return;
+  const ok = await syncCustomerQuoteDeleteToServer(quoteId);
+  showToast(ok ? "고객 견적과 관련 정보를 완전히 삭제했습니다." : "고객 견적 삭제에 실패했습니다.");
 }
 
 async function submitCustomerQuoteEdit(event) {
@@ -2505,9 +2462,13 @@ async function saveBrandConsultationAdmin(id) {
     settlementStatus: rowEl.querySelector('[data-brand-settlement-status]')?.value || 'unsettled',
     adminMemo: rowEl.querySelector('[data-brand-admin-memo]')?.value || '',
   };
+  const consultation = getBrandConsultationsAdmin().find((item) => String(item.id) === String(id));
+  const consultationPath = consultation?.consultationType === 'subscription'
+    ? `/api/brand-hall/subscription-consultations/${encodeURIComponent(id)}`
+    : `/api/brand-hall/consultations/${encodeURIComponent(id)}`;
   setAdminLoading(true, '상담·정산 상태를 저장하는 중입니다.', '계약 진행 정보와 수수료 정산 상태를 서버에 반영하고 있습니다.');
   try {
-    const result = await apiJson(`/api/brand-hall/consultations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(payload), silent:true });
+    const result = await apiJson(consultationPath, { method:'PATCH', body:JSON.stringify(payload), silent:true });
     if (!result?.ok || !result.row) { showToast(result?.message || '상담 상태 저장에 실패했습니다.'); return; }
     const rows = getBrandConsultationsAdmin();
     const index = rows.findIndex((row) => String(row.id) === String(id));
@@ -2521,10 +2482,14 @@ async function saveBrandConsultationAdmin(id) {
 async function deleteBrandConsultationAdmin(id) {
   const row = getBrandConsultationsAdmin().find((item) => String(item.id) === String(id));
   if (!row) return;
-  if (!window.confirm(`${row.customerName || '고객'}님의 브랜드관 상담 내역을 삭제할까요?\n삭제 후 복구할 수 없습니다.`)) return;
+  const label = row.consultationType === 'subscription' ? '가전 구독 상담' : '브랜드관 상담';
+  if (!window.confirm(`${row.customerName || '고객'}님의 ${label} 내역을 삭제할까요?\n삭제 후 복구할 수 없습니다.`)) return;
+  const consultationPath = row.consultationType === 'subscription'
+    ? `/api/brand-hall/subscription-consultations/${encodeURIComponent(id)}`
+    : `/api/brand-hall/consultations/${encodeURIComponent(id)}`;
   setAdminLoading(true, '브랜드관 상담을 삭제하는 중입니다.', '상담·계약·정산 정보를 서버에서 삭제하고 있습니다.');
   try {
-    const result = await apiJson(`/api/brand-hall/consultations/${encodeURIComponent(id)}`, { method:'DELETE', silent:true });
+    const result = await apiJson(consultationPath, { method:'DELETE', silent:true });
     if (!result?.ok) { showToast(result?.message || '브랜드관 상담 삭제에 실패했습니다.'); return; }
     setBrandConsultationsAdmin(getBrandConsultationsAdmin().filter((item) => String(item.id) !== String(id)));
     renderBrandHallAdmin();
@@ -2547,7 +2512,13 @@ function renderBrandHallAdmin() {
   const consultations = getBrandConsultationsAdmin();
   if (brandConsultAdminCount) brandConsultAdminCount.textContent = `${consultations.length}건`;
   if (brandConsultAdminRows) {
-    brandConsultAdminRows.innerHTML = consultations.length ? consultations.map((row) => `<tr data-brand-consult-row="${escapeBrandHtml(row.id)}"><td><div class="brand-consult-meta"><strong>${brandDate(row.createdAt)}</strong>${escapeBrandHtml(row.deliveryStatus || '')}${row.deliveryError ? `<br><span title="${escapeBrandHtml(row.deliveryError)}">알림 오류</span>` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.customerName)}</strong><a href="tel:${escapeBrandHtml(row.customerPhone)}">${escapeBrandHtml(row.customerPhoneFormatted || formatPhoneNumber(row.customerPhone))}</a><br>${escapeBrandHtml(row.customerRegion || '')}<br>${escapeBrandHtml(row.preferredTime || '')}${row.memo ? `<br>문의: ${escapeBrandHtml(row.memo)}` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.packageTitle || '-')}</strong>공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')}<br>내부: ${escapeBrandHtml(row.channel || '')} ${escapeBrandHtml(row.branch || '')}<br>${escapeBrandHtml(row.manager || '')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}</div></td><td><select data-brand-consult-status><option value="new" ${row.status==='new'?'selected':''}>신규</option><option value="contacted" ${row.status==='contacted'?'selected':''}>고객 연락</option><option value="negotiating" ${row.status==='negotiating'?'selected':''}>계약 진행</option><option value="contracted" ${row.status==='contracted'?'selected':''}>계약 완료</option><option value="cancelled" ${row.status==='cancelled'?'selected':''}>취소</option></select></td><td><input data-brand-contract-amount type="number" min="0" step="1000" value="${Number(row.contractAmount || 0)}" /></td><td><input data-brand-commission-amount type="number" min="0" step="1000" value="${Number(row.commissionAmount || 0)}" /></td><td><select data-brand-settlement-status><option value="unsettled" ${row.settlementStatus==='unsettled'?'selected':''}>미정산</option><option value="pending" ${row.settlementStatus==='pending'?'selected':''}>정산예정</option><option value="settled" ${row.settlementStatus==='settled'?'selected':''}>정산완료</option><option value="waived" ${row.settlementStatus==='waived'?'selected':''}>수수료없음</option></select>${row.settledAt ? `<div class="brand-consult-meta">${brandDate(row.settledAt)}</div>` : ''}</td><td><textarea data-brand-admin-memo maxlength="1200" placeholder="상담 내용, 계약 일정, 정산 메모">${escapeBrandHtml(row.adminMemo || '')}</textarea></td><td><button class="primary-btn brand-consult-save-btn" type="button" data-brand-consult-save="${escapeBrandHtml(row.id)}">저장</button></td></tr>`).join('') : '<tr><td colspan="9"><div class="brand-admin-empty">브랜드관 상담 신청이 없습니다.</div></td></tr>';
+    brandConsultAdminRows.innerHTML = consultations.length ? consultations.map((row) => {
+      const isSubscription = row.consultationType === 'subscription';
+      const source = isSubscription
+        ? `<span class="brand-consult-type">가전 구독관</span><strong>${escapeBrandHtml(row.packageTitle || 'LG전자 가전 구독')}</strong>모델: ${escapeBrandHtml(row.optionModel || row.productModel || '-')}<br>${row.optionLabel ? `옵션: ${escapeBrandHtml(row.optionLabel)}<br>` : ''}${row.monthlyFee72 ? `72개월 월 ${brandMoney(row.monthlyFee72)}<br>` : ''}상담 전달: ${escapeBrandHtml(row.partnerName || '픽견적 제휴 상담업체 및 LG전자')}<br>계약 주체: LG전자`
+        : `<span class="brand-consult-type">브랜드 패키지</span><strong>${escapeBrandHtml(row.packageTitle || '-')}</strong>공개: ${escapeBrandHtml(row.publicChannel || publicBrandChannel(row.channel) || '-')}<br>내부: ${escapeBrandHtml(row.channel || '')} ${escapeBrandHtml(row.branch || '')}<br>${escapeBrandHtml(row.manager || '')} ${escapeBrandHtml(formatPhoneNumber(row.managerPhone || ''))}`;
+      return `<tr data-brand-consult-row="${escapeBrandHtml(row.id)}" data-consultation-type="${isSubscription ? 'subscription' : 'brand'}"><td><div class="brand-consult-meta"><strong>${brandDate(row.createdAt)}</strong>${escapeBrandHtml(row.deliveryStatus || '')}${row.deliveryError ? `<br><span title="${escapeBrandHtml(row.deliveryError)}">알림 오류</span>` : ''}</div></td><td><div class="brand-consult-meta"><strong>${escapeBrandHtml(row.customerName)}</strong><a href="tel:${escapeBrandHtml(row.customerPhone)}">${escapeBrandHtml(row.customerPhoneFormatted || formatPhoneNumber(row.customerPhone))}</a><br>${escapeBrandHtml(row.customerRegion || '')}<br>${escapeBrandHtml(row.preferredTime || '')}${row.memo ? `<br>추가 요청: ${escapeBrandHtml(row.memo)}` : ''}</div></td><td><div class="brand-consult-meta">${source}</div></td><td><select data-brand-consult-status><option value="new" ${row.status==='new'?'selected':''}>신규</option><option value="contacted" ${row.status==='contacted'?'selected':''}>고객 연락</option><option value="negotiating" ${row.status==='negotiating'?'selected':''}>계약 진행</option><option value="contracted" ${row.status==='contracted'?'selected':''}>계약 완료</option><option value="cancelled" ${row.status==='cancelled'?'selected':''}>취소</option></select></td><td><input data-brand-contract-amount type="number" min="0" step="1000" value="${Number(row.contractAmount || 0)}" /></td><td><input data-brand-commission-amount type="number" min="0" step="1000" value="${Number(row.commissionAmount || 0)}" /></td><td><select data-brand-settlement-status><option value="unsettled" ${row.settlementStatus==='unsettled'?'selected':''}>미정산</option><option value="pending" ${row.settlementStatus==='pending'?'selected':''}>정산예정</option><option value="settled" ${row.settlementStatus==='settled'?'selected':''}>정산완료</option><option value="waived" ${row.settlementStatus==='waived'?'selected':''}>수수료없음</option></select>${row.settledAt ? `<div class="brand-consult-meta">${brandDate(row.settledAt)}</div>` : ''}</td><td><textarea data-brand-admin-memo maxlength="1200" placeholder="상담 내용, 계약 일정, 정산 메모">${escapeBrandHtml(row.adminMemo || '')}</textarea></td><td><button class="primary-btn brand-consult-save-btn" type="button" data-brand-consult-save="${escapeBrandHtml(row.id)}">저장</button></td></tr>`;
+    }).join('') : '<tr><td colspan="9"><div class="brand-admin-empty">브랜드관·가전 구독관 상담 신청이 없습니다.</div></td></tr>';
   }
   document.querySelectorAll('[data-brand-consult-save]').forEach((saveButton) => {
     if (saveButton.parentElement?.querySelector('[data-brand-consult-delete]')) return;

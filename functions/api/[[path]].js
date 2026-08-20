@@ -107,6 +107,7 @@ async function ensureBrandAdminTables(env) {
   await env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS brand_packages (id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, channel TEXT DEFAULT '', branch TEXT DEFAULT '', branch_region TEXT DEFAULT '', manager TEXT DEFAULT '', manager_phone TEXT DEFAULT '', brand TEXT DEFAULT '', title TEXT NOT NULL, items_json TEXT DEFAULT '[]', original_price INTEGER DEFAULT 0, sale_price INTEGER DEFAULT 0, benefits TEXT DEFAULT '', cover_image TEXT DEFAULT '', cover_image_key TEXT DEFAULT '', status TEXT DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS brand_consultations (id TEXT PRIMARY KEY, package_id TEXT NOT NULL, seller_id TEXT NOT NULL, channel TEXT DEFAULT '', branch TEXT DEFAULT '', manager TEXT DEFAULT '', manager_phone TEXT DEFAULT '', package_title TEXT DEFAULT '', customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, customer_region TEXT DEFAULT '', preferred_time TEXT DEFAULT '', memo TEXT DEFAULT '', consent_json TEXT DEFAULT '{}', status TEXT DEFAULT 'new', delivery_status TEXT DEFAULT 'pending', delivery_error TEXT DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS subscription_consultations (id TEXT PRIMARY KEY, product_model TEXT DEFAULT '', product_name TEXT DEFAULT '', option_model TEXT DEFAULT '', option_label TEXT DEFAULT '', monthly_fee_72 INTEGER DEFAULT 0, customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, customer_region TEXT DEFAULT '', preferred_time TEXT DEFAULT '', memo TEXT DEFAULT '', partner_name TEXT NOT NULL, consent_version TEXT NOT NULL, collection_consent_json TEXT NOT NULL DEFAULT '{}', third_party_consent_json TEXT NOT NULL DEFAULT '{}', consented_at TEXT NOT NULL, phone_verification_id TEXT NOT NULL, phone_verified_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new', delivery_status TEXT NOT NULL DEFAULT 'pending', delivery_error TEXT DEFAULT '', contract_amount INTEGER DEFAULT 0, commission_amount INTEGER DEFAULT 0, settlement_status TEXT DEFAULT 'unsettled', admin_memo TEXT DEFAULT '', settled_at TEXT DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
   ]);
   await Promise.all([
     env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN contract_amount INTEGER DEFAULT 0").run().catch(() => {}),
@@ -114,6 +115,11 @@ async function ensureBrandAdminTables(env) {
     env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN settlement_status TEXT DEFAULT 'unsettled'").run().catch(() => {}),
     env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN admin_memo TEXT DEFAULT ''").run().catch(() => {}),
     env.DB.prepare("ALTER TABLE brand_consultations ADD COLUMN settled_at TEXT DEFAULT ''").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE subscription_consultations ADD COLUMN contract_amount INTEGER DEFAULT 0").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE subscription_consultations ADD COLUMN commission_amount INTEGER DEFAULT 0").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE subscription_consultations ADD COLUMN settlement_status TEXT DEFAULT 'unsettled'").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE subscription_consultations ADD COLUMN admin_memo TEXT DEFAULT ''").run().catch(() => {}),
+    env.DB.prepare("ALTER TABLE subscription_consultations ADD COLUMN settled_at TEXT DEFAULT ''").run().catch(() => {}),
   ]);
   brandAdminTablesReady = true;
 }
@@ -123,16 +129,21 @@ function normalizeAdminBrandPackage(row) {
 }
 
 function normalizeAdminBrandConsultation(row) {
-  return { id: row.id, packageId: row.package_id || '', sellerId: row.seller_id || '', channel: row.channel || '', branch: row.branch || '', manager: row.manager || '', managerPhone: row.manager_phone || '', packageTitle: row.package_title || '', customerName: row.customer_name || '', customerPhone: normalizePhone(row.customer_phone || ''), customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''), customerRegion: row.customer_region || '', preferredTime: row.preferred_time || '', memo: row.memo || '', status: row.status || 'new', deliveryStatus: row.delivery_status || 'pending', deliveryError: row.delivery_error || '', contractAmount: Number(row.contract_amount || 0), commissionAmount: Number(row.commission_amount || 0), settlementStatus: row.settlement_status || 'unsettled', adminMemo: row.admin_memo || '', settledAt: row.settled_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
+  return { consultationType: 'brand', id: row.id, packageId: row.package_id || '', sellerId: row.seller_id || '', channel: row.channel || '', branch: row.branch || '', manager: row.manager || '', managerPhone: row.manager_phone || '', packageTitle: row.package_title || '', customerName: row.customer_name || '', customerPhone: normalizePhone(row.customer_phone || ''), customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''), customerRegion: row.customer_region || '', preferredTime: row.preferred_time || '', memo: row.memo || '', status: row.status || 'new', deliveryStatus: row.delivery_status || 'pending', deliveryError: row.delivery_error || '', contractAmount: Number(row.contract_amount || 0), commissionAmount: Number(row.commission_amount || 0), settlementStatus: row.settlement_status || 'unsettled', adminMemo: row.admin_memo || '', settledAt: row.settled_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
+}
+
+function normalizeAdminSubscriptionConsultation(row) {
+  return { consultationType: 'subscription', id: row.id, packageTitle: row.product_name || 'LG전자 가전 구독', productModel: row.product_model || '', optionModel: row.option_model || '', optionLabel: row.option_label || '', monthlyFee72: Number(row.monthly_fee_72 || 0), partnerName: row.partner_name || '픽견적 제휴 상담업체 및 LG전자', contractParty: 'LG전자', publicChannel: '가전 구독관', customerName: row.customer_name || '', customerPhone: normalizePhone(row.customer_phone || ''), customerPhoneFormatted: formatPhoneNumber(row.customer_phone || ''), customerRegion: row.customer_region || '', preferredTime: row.preferred_time || '', memo: row.memo || '', status: row.status || 'new', deliveryStatus: row.delivery_status || 'pending', deliveryError: row.delivery_error || '', contractAmount: Number(row.contract_amount || 0), commissionAmount: Number(row.commission_amount || 0), settlementStatus: row.settlement_status || 'unsettled', adminMemo: row.admin_memo || '', settledAt: row.settled_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
 }
 
 async function getAdminBrandHall(env) {
   await ensureBrandAdminTables(env);
-  const [packages, consultations] = await Promise.all([
+  const [packages, consultations, subscriptionConsultations] = await Promise.all([
     env.DB.prepare("SELECT * FROM brand_packages ORDER BY updated_at DESC LIMIT 300").all(),
     env.DB.prepare("SELECT * FROM brand_consultations ORDER BY created_at DESC LIMIT 500").all(),
+    env.DB.prepare("SELECT * FROM subscription_consultations ORDER BY created_at DESC LIMIT 500").all(),
   ]);
-  return json({ ok: true, packages: (packages.results || []).map(normalizeAdminBrandPackage), consultations: (consultations.results || []).map(normalizeAdminBrandConsultation) });
+  return json({ ok: true, packages: (packages.results || []).map(normalizeAdminBrandPackage), consultations: (consultations.results || []).map(normalizeAdminBrandConsultation), subscriptionConsultations: (subscriptionConsultations.results || []).map(normalizeAdminSubscriptionConsultation) });
 }
 
 async function saveAdminBrandPackage(env, request, id = '') {
@@ -200,6 +211,27 @@ async function deleteAdminBrandConsultation(env, id) {
   const existing = await env.DB.prepare("SELECT id FROM brand_consultations WHERE id = ? LIMIT 1").bind(id).first();
   if (!existing) return json({ ok: false, message: '브랜드관 상담을 찾을 수 없습니다.' }, 404);
   await env.DB.prepare("DELETE FROM brand_consultations WHERE id = ?").bind(id).run();
+  return json({ ok: true, deletedId: id });
+}
+
+async function updateAdminSubscriptionConsultation(env, request, id) {
+  await ensureBrandAdminTables(env);
+  const body = await request.json().catch(() => ({}));
+  const existing = await env.DB.prepare("SELECT * FROM subscription_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  if (!existing) return json({ ok: false, message: '가전 구독 상담을 찾을 수 없습니다.' }, 404);
+  const status = ['new', 'contacted', 'negotiating', 'contracted', 'cancelled'].includes(String(body.status)) ? String(body.status) : existing.status || 'new';
+  const settlementStatus = ['unsettled', 'pending', 'settled', 'waived'].includes(String(body.settlementStatus)) ? String(body.settlementStatus) : existing.settlement_status || 'unsettled';
+  const settledAt = settlementStatus === 'settled' ? (existing.settled_at || new Date().toISOString()) : '';
+  await env.DB.prepare("UPDATE subscription_consultations SET status = ?, contract_amount = ?, commission_amount = ?, settlement_status = ?, admin_memo = ?, settled_at = ?, updated_at = ? WHERE id = ?").bind(status, Math.max(0, Number(body.contractAmount || 0)), Math.max(0, Number(body.commissionAmount || 0)), settlementStatus, String(body.adminMemo || '').slice(0, 1200), settledAt, new Date().toISOString(), id).run();
+  const row = await env.DB.prepare("SELECT * FROM subscription_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  return json({ ok: true, row: normalizeAdminSubscriptionConsultation(row) });
+}
+
+async function deleteAdminSubscriptionConsultation(env, id) {
+  await ensureBrandAdminTables(env);
+  const existing = await env.DB.prepare("SELECT id FROM subscription_consultations WHERE id = ? LIMIT 1").bind(id).first();
+  if (!existing) return json({ ok: false, message: '가전 구독 상담을 찾을 수 없습니다.' }, 404);
+  await env.DB.prepare("DELETE FROM subscription_consultations WHERE id = ?").bind(id).run();
   return json({ ok: true, deletedId: id });
 }
 
@@ -428,19 +460,6 @@ function normalizeMessage(row) {
     createdAt: row.created_at || "",
     sentAt: row.sent_at || "",
     canceledAt: row.canceled_at || "",
-  };
-}
-
-function normalizeDeletedQuoteLog(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    quoteId: row.quote_id || "",
-    quoteNumber: row.quote_number || "",
-    customer: row.customer || "",
-    phone: row.phone || "",
-    reason: row.reason || "",
-    deletedAt: row.deleted_at || "",
   };
 }
 
@@ -995,21 +1014,8 @@ async function getApprovedSellers(env) {
   return json({ ok: true, rows: result.results.map(normalizeApprovedSeller) });
 }
 
-async function ensureDeletedQuoteLogTable(env) {
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS deleted_quote_logs (
-      id TEXT PRIMARY KEY,
-      quote_id TEXT DEFAULT '',
-      quote_number TEXT DEFAULT '',
-      customer TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      deleted_at TEXT NOT NULL
-    )`
-  ).run();
-  await env.DB.prepare(
-    "CREATE INDEX IF NOT EXISTS idx_deleted_quote_logs_deleted_at ON deleted_quote_logs(deleted_at)"
-  ).run();
+async function purgeDeletedQuoteLogStorage(env) {
+  await env.DB.prepare("DROP TABLE IF EXISTS deleted_quote_logs").run();
 }
 
 async function ensureCustomerQuoteColumns(env) {
@@ -1168,9 +1174,8 @@ async function revealQuoteSubmissionAudit(env, request, quoteId) {
 }
 
 async function getDeletedQuoteLogs(env) {
-  await ensureDeletedQuoteLogTable(env);
-  const result = await env.DB.prepare("SELECT * FROM deleted_quote_logs ORDER BY deleted_at DESC LIMIT 100").all();
-  return json({ ok: true, rows: (result.results || []).map(normalizeDeletedQuoteLog) });
+  await purgeDeletedQuoteLogStorage(env);
+  return json({ ok: true, rows: [] });
 }
 
 async function ensureLplanTrainingTable(env) {
@@ -1240,12 +1245,11 @@ async function getLplanTrainingQuotes(env, request) {
 
 async function deleteCustomerQuote(env, request, id) {
   await ensureCustomerQuoteColumns(env);
-  await ensureDeletedQuoteLogTable(env);
-  const body = await request.json().catch(() => ({}));
-  const reason = String(body.reason || "").trim();
-  if (reason.length < 2) {
-    return json({ ok: false, message: "삭제 사유를 입력해주세요." }, 400);
-  }
+  await ensureLplanTrainingTable(env);
+  await ensureAdminChatTables(env);
+  await ensureAnonymousTables(env);
+  await ensureQuoteAuditAccessLogTable(env);
+  await purgeDeletedQuoteLogStorage(env);
 
   const quote = await env.DB.prepare("SELECT * FROM customer_quotes WHERE id = ?").bind(id).first();
   if (!quote) return json({ ok: false, message: "삭제할 고객 견적을 찾을 수 없습니다." }, 404);
@@ -1260,32 +1264,29 @@ async function deleteCustomerQuote(env, request, id) {
     )
   );
 
-  if (env.FILES) {
-    for (const key of objectKeys) {
-      try {
-        await env.FILES.delete(key);
-      } catch (error) {
-        // Continue deleting database records even if an object was already removed.
-      }
-    }
+  if (objectKeys.length && !env.FILES) {
+    return json({ ok: false, message: "견적 이미지 저장소에 연결할 수 없어 삭제를 중단했습니다." }, 503);
   }
+  for (const key of objectKeys) await env.FILES.delete(key);
 
-  const deletedAt = new Date().toISOString();
-  await env.DB.prepare(
-    `INSERT INTO deleted_quote_logs
-      (id, quote_id, quote_number, customer, phone, reason, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(createId("deleted-quote"), quote.id, quote.quote_number || "", quote.customer, quote.phone, reason, deletedAt)
-    .run();
+  const verificationId = String(quote.submission_phone_verification_id || "").trim();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE anonymous_seller_restrictions SET last_case_id = '' WHERE last_case_id IN (SELECT id FROM anonymous_policy_cases WHERE quote_id = ?)").bind(id),
+    env.DB.prepare("DELETE FROM anonymous_audit_logs WHERE case_id IN (SELECT id FROM anonymous_policy_cases WHERE quote_id = ?) OR consultation_id IN (SELECT id FROM anonymous_consultations WHERE quote_id = ?)").bind(id, id),
+    env.DB.prepare("DELETE FROM anonymous_consultation_messages WHERE consultation_id IN (SELECT id FROM anonymous_consultations WHERE quote_id = ?)").bind(id),
+    env.DB.prepare("DELETE FROM anonymous_policy_cases WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM anonymous_consultations WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM reviews WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM bids WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM quote_audit_access_logs WHERE quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM lplan_quote_patterns WHERE source_quote_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM quote_phone_verifications WHERE id = ?").bind(verificationId),
+    env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id),
+  ]);
 
-  await env.DB.prepare("DELETE FROM reviews WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM bids WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM quote_images WHERE quote_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM alimtalk_queue WHERE related_id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM customer_quotes WHERE id = ?").bind(id).run();
-
-  return json({ ok: true, id, deletedAt });
+  return json({ ok: true, id, permanentlyDeleted: true });
 }
 
 async function deleteManagerBid(env, id) {
@@ -1901,6 +1902,8 @@ export async function onRequest(context) {
   if (path.startsWith("brand-hall/packages/") && method === "DELETE") return deleteAdminBrandPackage(env, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path.startsWith("brand-hall/consultations/") && method === "PATCH") return updateAdminBrandConsultation(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path.startsWith("brand-hall/consultations/") && method === "DELETE") return deleteAdminBrandConsultation(env, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/subscription-consultations/") && method === "PATCH") return updateAdminSubscriptionConsultation(env, request, decodeURIComponent(pathParts.slice(2).join("/")));
+  if (path.startsWith("brand-hall/subscription-consultations/") && method === "DELETE") return deleteAdminSubscriptionConsultation(env, decodeURIComponent(pathParts.slice(2).join("/")));
   if (path === "anonymous-consultations" && method === "GET") return getAdminAnonymousConsultations(env, request);
   if (path === "anonymous-policy-cases" && method === "GET") return getAnonymousCases(env);
   if (path.startsWith("anonymous-policy-cases/") && method === "PATCH") return reviewAnonymousCase(env, request, decodeURIComponent(pathParts.slice(1).join("/")));

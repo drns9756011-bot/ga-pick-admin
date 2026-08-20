@@ -2413,6 +2413,7 @@ body[data-admin-page="sellerAccess"] .stat-grid { margin-bottom: 22px; }
 .brand-consult-admin-table td:nth-child(8) { min-width: 220px; }
 .brand-consult-admin-table .brand-consult-meta { font-size: .74rem; line-height: 1.5; color: #687572; }
 .brand-consult-admin-table .brand-consult-meta strong { display: block; color: #25322f; font-size: .8rem; }
+.brand-consult-type { display: inline-flex; margin-bottom: 6px; padding: 3px 7px; border-radius: 4px; background: #e8f0f8; color: #123b67; font-size: .68rem; font-weight: 800; }
 .brand-consult-admin-table textarea { min-height: 72px; resize: vertical; }
 .brand-consult-save-btn { white-space: nowrap; }
 .brand-admin-empty { padding: 34px 18px; text-align: center; color: #77837f; background: #f8faf9; border-radius: 13px; }
