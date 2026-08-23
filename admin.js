@@ -1348,6 +1348,41 @@ function renderStatsCards() {
   renderStats();
 }
 
+function renderDashboardWorkQueue() {
+  const dashboardHome = document.querySelector("#dashboardHome");
+  if (!dashboardHome) return;
+
+  const quotes = getCustomerQuotes();
+  const applications = getApplications();
+  const messages = getMessages();
+  const consultations = readStorageArray(STORAGE_KEYS.brandConsultations);
+  const workRows = [
+    { label: "고객 견적", count: quotes.filter((quote) => ["quote-bidding", "quote-choosing"].includes(quoteStatusMeta(quote).className)).length, note: "진행 중 견적을 확인하고 제안 현황을 관리합니다.", href: "/customers", page: "customers", action: "견적 관리" },
+    { label: "판매자 승인", count: applications.filter((application) => application.status === "pending").length, note: "검토 대기 중인 판매자 등록 요청입니다.", href: "/sellers", page: "sellers", action: "승인 검토" },
+    { label: "브랜드관 상담", count: consultations.filter((consultation) => ["new", "contacted", "negotiating"].includes(String(consultation.status || "new"))).length, note: "계약 및 정산 전 상담 요청을 확인합니다.", href: "/brand-hall", page: "brandHall", action: "상담 관리" },
+    { label: "알림톡 발송", count: messages.filter((message) => ["ready", "scheduled", "sending", "accepted", "failed"].includes(String(message.status || ""))).length, note: "대기 또는 확인이 필요한 발송 건입니다.", href: "/alimtalk", page: "alimtalk", action: "발송 현황" },
+  ];
+
+  dashboardHome.classList.add("system-work-queue");
+  dashboardHome.innerHTML = `
+    <div class="system-panel-head">
+      <div><span class="system-kicker">WORK QUEUE</span><h2>오늘 처리할 업무</h2></div>
+      <span class="system-panel-note">대기 건을 선택하면 해당 업무 화면으로 이동합니다.</span>
+    </div>
+    <div class="system-work-table" role="table" aria-label="오늘 처리할 업무">
+      <div class="system-work-row system-work-heading" role="row"><span>업무 구분</span><span>대기 건</span><span>처리 내용</span><span></span></div>
+      ${workRows.map((row) => `
+        <a class="system-work-row" href="${row.href}" data-admin-nav="${row.page}" role="row">
+          <strong>${escapeHTML(row.label)}</strong>
+          <b>${Number(row.count).toLocaleString("ko-KR")}건</b>
+          <span>${escapeHTML(row.note)}</span>
+          <em>${escapeHTML(row.action)}</em>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
+
 function summarizeCustomerQuotes(quotes) {
   return quotes.reduce((summary, quote) => {
     const status = quoteStatusMeta(quote);
@@ -2533,6 +2568,7 @@ function renderBrandHallAdmin() {
 
 function renderAll() {
   renderStatsCards();
+  renderDashboardWorkQueue();
   renderLplanSyncPanel();
   renderCustomerQuotes();
   renderApplications();
