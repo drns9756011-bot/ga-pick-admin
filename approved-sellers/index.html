@@ -6,7 +6,8 @@
     <title>픽견적 관리자</title>
     <meta name="description" content="픽견적 판매자 신청, 고객 견적, 알림톡 발송 상태를 관리하는 운영 페이지입니다." />
     <link rel="stylesheet" href="/admin.css?v=20260823-operations-console-v1" />
-    <script defer src="/admin.js?v=20260819-phone-verification-v1" charset="utf-8"></script>
+    <link rel="stylesheet" href="/admin-console.css?v=20260823-enterprise-v1" />
+    <script defer src="/admin.js?v=20260823-enterprise-v1" charset="utf-8"></script>
   </head>
   <body>
     <aside class="sidebar">
@@ -17,17 +18,20 @@
           <small>관리자 콘솔</small>
         </span>
       </a>
-      <nav class="side-nav" aria-label="관리자 메뉴">
-        <span class="nav-label">운영 메뉴</span>
-        <a href="/" data-admin-nav="dashboard">관리 현황</a>
+            <nav class="side-nav" aria-label="관리자 메뉴">
+        <span class="nav-label">견적 운영</span>
+        <a href="/" data-admin-nav="dashboard">운영 대시보드</a>
         <a href="/customers" data-admin-nav="customers">고객 견적</a>
+        <span class="nav-label">판매자 운영</span>
         <a href="/sellers" data-admin-nav="sellers">판매자 신청</a>
-        <a href="/approved-sellers" data-admin-nav="approvedSellers">승인 판매자</a>
-        <a href="/brand-hall" data-admin-nav="brandHall">브랜드관 관리</a>
+        <a href="/approved-sellers" data-admin-nav="approvedSellers" class="is-active" aria-current="page">승인 판매자</a>
         <a href="/seller-access" data-admin-nav="sellerAccess">판매자 접속 기록</a>
-        <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
-        <a href="/anonymous-consultation" data-admin-nav="anonymousConsultation">익명상담 판정</a>
+        <span class="nav-label">서비스 운영</span>
+        <a href="/brand-hall" data-admin-nav="brandHall">브랜드관 관리</a>
         <a href="/subscription-products">구독 상품 업로드</a>
+        <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
+        <span class="nav-label">보안 및 상담</span>
+        <a href="/anonymous-consultation" data-admin-nav="anonymousConsultation">익명상담 판정</a>
         <a href="/anonymous-chat">채팅 관리</a>
       </nav>
       <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면으로</a>

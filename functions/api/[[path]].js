@@ -1083,13 +1083,33 @@ async function getQuoteBids(env, quoteId) {
 async function getCustomerQuotes(env) {
   await ensureCustomerQuoteColumns(env);
   const result = await env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all();
-  const rows = [];
+  const quotes = result.results || [];
+  if (!quotes.length) return json({ ok: true, rows: [] });
 
-  for (const quote of result.results || []) {
-    const images = await getQuoteImages(env, quote.id);
-    const bids = await getQuoteBids(env, quote.id);
-    rows.push(normalizeCustomerQuote({ ...quote, bid_count: bids.length, bids }, images));
+  // 견적 100건을 조회할 때 건별로 이미지를 다시 읽으면 최대 200회 요청이 순차 발생합니다.
+  // 목록 데이터는 두 번의 묶음 조회로 가져와 화면 응답 시간을 일정하게 유지합니다.
+  const quoteIds = quotes.map((quote) => quote.id);
+  const placeholders = quoteIds.map(() => "?").join(", ");
+  const [imageResult, bidResult] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM quote_images WHERE quote_id IN (${placeholders}) ORDER BY quote_id ASC, sort_order ASC`).bind(...quoteIds).all(),
+    env.DB.prepare(`SELECT * FROM bids WHERE quote_id IN (${placeholders}) ORDER BY quote_id ASC, price ASC, created_at ASC`).bind(...quoteIds).all(),
+  ]);
+  const imagesByQuoteId = new Map();
+  const bidsByQuoteId = new Map();
+  for (const image of imageResult.results || []) {
+    const list = imagesByQuoteId.get(image.quote_id) || [];
+    list.push(image);
+    imagesByQuoteId.set(image.quote_id, list);
   }
+  for (const bid of bidResult.results || []) {
+    const list = bidsByQuoteId.get(bid.quote_id) || [];
+    list.push(normalizeBid(bid));
+    bidsByQuoteId.set(bid.quote_id, list);
+  }
+  const rows = quotes.map((quote) => {
+    const bids = bidsByQuoteId.get(quote.id) || [];
+    return normalizeCustomerQuote({ ...quote, bid_count: bids.length, bids }, imagesByQuoteId.get(quote.id) || []);
+  });
 
   return json({ ok: true, rows });
 }
@@ -1870,6 +1890,9 @@ export async function onRequest(context) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
 
+  if (path === "auth-status" && method === "GET") {
+    return json({ ok: true, tokenSource: "Cloudflare Secret" });
+  }
   if (path === "subscription-products/status" && method === "GET") return handleSubscriptionImport(() => getSubscriptionUploadStatus(env, request));
   if (path === "subscription-products/images/repair" && method === "POST") return handleSubscriptionImport(() => repairActiveSubscriptionImages(env));
   if (path === "subscription-products/import/start" && method === "POST") return handleSubscriptionImport(() => startSubscriptionProductImport(env));

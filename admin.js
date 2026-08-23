@@ -99,9 +99,9 @@ if (document.querySelector(".home-link")) {
 const ADMIN_PAGE_CONFIG = {
   dashboard: {
     path: "/",
-    title: "관리자 대시보드",
-    heading: "운영 현황을 한눈에 확인하세요.",
-    copy: "카드를 누르면 고객 견적, 판매자 신청, 승인 판매자, 알림톡 상태 페이지로 이동합니다.",
+    title: "운영 대시보드",
+    heading: "운영 대시보드",
+    copy: "견적, 판매자, 상담, 알림 업무의 현재 상태를 확인하고 필요한 처리 화면으로 이동합니다.",
     visible: ["statGrid", "lplanSyncPanel", "dashboardHome"],
   },
   customers: {
@@ -2795,8 +2795,12 @@ document.addEventListener("click", (event) => {
   if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const url = new URL(link.href, window.location.href);
   if (url.origin !== window.location.origin) return;
+  // 독립 관리 도구(채팅, 익명상담, 구독 업로드)는 SPA 화면 전환으로 가로채지 않습니다.
+  // 실제 URL을 열어야 각 도구의 전용 스크립트가 정상 실행됩니다.
+  const pageKey = link.dataset.adminNav || adminPageKeyFromPath(url.pathname);
+  if (!ADMIN_PAGE_CONFIG[pageKey]) return;
   event.preventDefault();
-  navigateAdminPage(link.dataset.adminNav || adminPageKeyFromPath(url.pathname));
+  navigateAdminPage(pageKey);
 });
 
 window.addEventListener("popstate", () => {
