@@ -1,0 +1,153 @@
+/* 전산형 업무 시스템 레이아웃: 소개 페이지가 아닌 ERP/운영 콘솔 구조 */
+:root {
+  --erp-navy: #173d63;
+  --erp-blue: #1b6eb2;
+  --erp-bg: #f4f6f8;
+  --erp-line: #dbe2e9;
+  --erp-text: #27384a;
+  --erp-subtle: #6c7c8d;
+}
+
+body { min-width: 0; background: var(--erp-bg); color: var(--erp-text); }
+.sidebar {
+  width: 224px;
+  padding: 0 10px 14px;
+  background: #fff;
+  border-right: 1px solid var(--erp-line);
+  box-shadow: none;
+}
+.brand {
+  height: 64px;
+  margin: 0 6px;
+  border-bottom: 1px solid #e6ebf0;
+  color: #173d63;
+  font-size: 18px;
+}
+.brand-mark { width: 30px; height: 30px; border-radius: 4px; background: var(--erp-navy); color: #fff; font-size: 15px; }
+.brand small { color: #7c8b9a; font-size: 10px; }
+.side-nav { padding-top: 8px; }
+.nav-label { margin: 15px 10px 6px; color: #8492a1; font-size: 10px; }
+.side-nav a {
+  min-height: 34px;
+  margin: 1px 0;
+  padding: 7px 10px 7px 14px;
+  border-radius: 3px;
+  color: #4c5e70;
+  font-size: 13px;
+  font-weight: 700;
+}
+.side-nav a:hover { background: #f1f6fb; color: #1b5f99; }
+.side-nav a.is-active, .side-nav a[aria-current="page"] { background: #eaf3fb; color: #155c97; }
+.side-nav a.is-active::before, .side-nav a[aria-current="page"]::before { width: 3px; height: 16px; background: #1b75bb; }
+.home-link { margin: auto 6px 0; border-color: #d8e1e9; background: #fff; color: #506477; font-size: 12px; }
+.home-link:hover { border-color: #8db1cf; background: #f3f8fc; color: #155c97; }
+
+.admin-shell { margin-left: 224px; padding: 0 28px 36px; }
+.admin-header {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  min-height: 70px;
+  margin: 0 -28px 20px;
+  padding: 14px 28px;
+  border: 0;
+  border-bottom: 1px solid var(--erp-line);
+  border-radius: 0;
+  background: rgba(255, 255, 255, .98);
+}
+.admin-header::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--erp-navy);
+  content: "";
+}
+.admin-header .eyebrow { margin-bottom: 2px; color: #6d7d8b; font-size: 10px; }
+.admin-header h1 { font-size: 21px; font-weight: 800; }
+.header-copy { margin-top: 3px; color: #718091; font-size: 12px; }
+.admin-actions { gap: 6px; }
+.admin-last-updated { padding-right: 7px; color: #7b8996; font-size: 11px; }
+.primary-btn { border-color: #1765a4; background: #1b6eb2; }
+.primary-btn:hover { border-color: #145889; background: #155c97; }
+.ghost-btn, .plain-btn { border-color: #d2dce5; color: #42586d; }
+
+.stat-grid, .admin-secondary-grid { grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.stat-card, .stat-grid > article, .admin-secondary-grid > article {
+  min-height: 88px;
+  padding: 12px 13px 11px 16px;
+  border: 1px solid var(--erp-line);
+  border-radius: 3px;
+}
+.stat-card::before, .stat-grid > article::before, .admin-secondary-grid > article::before { width: 3px; background: #4c91c4; }
+.stat-card span, .stat-grid span, .admin-secondary-grid span { font-size: 11px; }
+.stat-card strong, .stat-grid strong, .admin-secondary-grid strong { margin-top: 6px; font-size: 24px; }
+.stat-card small, .stat-grid small, .admin-secondary-grid small { margin-top: 6px; font-size: 10px; }
+
+.dashboard-home, .admin-panel, .panel, .workspace > .panel, .seller-access-panel { border-color: var(--erp-line); border-radius: 3px; }
+.dashboard-home-head, .panel-head { min-height: 52px; padding: 11px 16px; background: #fafbfc; }
+.dashboard-home h2, .panel h2, .admin-panel h2 { font-size: 16px; }
+.dashboard-link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard-link-card { min-height: 76px; padding: 13px 16px 13px 20px; }
+.dashboard-link-card:nth-child(3n) { border-right: 1px solid var(--erp-line); }
+.dashboard-link-card:nth-child(2n) { border-right: 0; }
+.dashboard-link-card:nth-last-child(-n + 3) { border-bottom: 1px solid var(--erp-line); }
+.dashboard-link-card:nth-last-child(-n + 2) { border-bottom: 0; }
+.dashboard-link-card::after { position: absolute; top: 50%; right: 16px; color: #9aaaba; content: ">"; transform: translateY(-50%); }
+.dashboard-link-card span { display: inline; margin-right: 8px; font-size: 10px; }
+.dashboard-link-card strong { display: inline; margin: 0; font-size: 14px; }
+.dashboard-link-card p { margin: 5px 20px 0 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.workspace { gap: 12px; }
+.panel-head { padding: 11px 15px; }
+.search-box, .customer-quote-search { padding: 10px 15px; }
+.admin-panel th, .panel th, .consult-table th { padding: 9px 10px; background: #f4f7f9; font-size: 10px; }
+.admin-panel td, .panel td, .consult-table td { padding: 9px 10px; font-size: 12px; }
+.application-item, .quote-admin-item, .approved-seller-row, .seller-access-row, .message-item { min-height: 52px !important; }
+.admin-modal-dialog { border-radius: 4px; }
+
+@media (max-width: 1180px) {
+  .stat-grid, .admin-secondary-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+  .workspace { grid-template-columns: minmax(330px, .9fr) minmax(360px, 1.1fr); }
+}
+@media (max-width: 900px) {
+  body { min-width: 0 !important; }
+  .sidebar {
+    position: static !important;
+    display: block;
+    width: 100% !important;
+    min-height: auto !important;
+    padding: 0;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--erp-line);
+  }
+  .brand { height: 52px; margin: 0 14px; }
+  .side-nav {
+    display: flex !important;
+    width: 100%;
+    padding: 0 8px;
+    overflow-x: auto;
+    background: #fff;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  .side-nav::-webkit-scrollbar { display: none; }
+  .nav-label { display: none !important; }
+  .side-nav a { flex: 0 0 auto; min-height: 38px; padding: 10px 11px; border-radius: 0; font-size: 12px; }
+  .side-nav a.is-active::before, .side-nav a[aria-current="page"]::before { top: auto; bottom: 0; width: 100%; height: 2px; border-radius: 0; }
+  .home-link { display: none !important; }
+  .admin-shell { margin-left: 0 !important; padding: 0 12px 28px !important; }
+  .admin-header { position: static; min-height: 0; margin: 0 -12px 14px; padding: 14px 12px 12px; }
+  .admin-header h1 { font-size: 18px; }
+  .header-copy { line-height: 1.45; }
+  .admin-header, .dashboard-home-head, .panel-head { align-items: flex-start; flex-direction: column; }
+  .admin-actions { width: 100%; flex-wrap: wrap; }
+  .stat-grid, .admin-secondary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat-card, .stat-grid > article { min-height: 78px; }
+  .dashboard-link-grid { grid-template-columns: 1fr; }
+  .dashboard-link-card, .dashboard-link-card:nth-child(2n), .dashboard-link-card:nth-last-child(-n + 3) { border-right: 0; border-bottom: 1px solid var(--erp-line); }
+  .dashboard-link-card:last-child { border-bottom: 0; }
+  .workspace { grid-template-columns: 1fr; }
+}
