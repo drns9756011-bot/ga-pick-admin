@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   approvedSellers: "pickquoteApprovedSellers",
   alimtalkQueue: "pickquoteAlimtalkQueue",
   customerQuotes: "pickquoteCustomerQuotes",
+  customerQuoteSummary: "pickquoteCustomerQuoteSummary",
   lplanTrainingQuotes: "pickquoteLplanTrainingQuotes",
   visitStats: "pickquoteVisitStats",
   sellerAccessLogs: "pickquoteSellerAccessLogs",
@@ -660,6 +661,7 @@ function clearCurrentAdminData() {
   writeStorageArray(STORAGE_KEYS.approvedSellers, []);
   writeStorageArray(STORAGE_KEYS.alimtalkQueue, []);
   writeStorageArray(STORAGE_KEYS.customerQuotes, []);
+  localStorage.removeItem(STORAGE_KEYS.customerQuoteSummary);
   localStorage.removeItem("pickquoteDeletedQuoteLogs");
   writeStorageArray(STORAGE_KEYS.lplanTrainingQuotes, []);
   writeStorageArray(STORAGE_KEYS.sellerAccessLogs, []);
@@ -744,6 +746,7 @@ async function loadAdminDataFromServer(options = {}) {
     }
     if (customerQuotes?.ok && Array.isArray(customerQuotes.rows)) {
       writeStorageArray(STORAGE_KEYS.customerQuotes, customerQuotes.rows);
+      localStorage.setItem(STORAGE_KEYS.customerQuoteSummary, JSON.stringify(customerQuotes.summary || {}));
       updatedCount += 1;
     }
     if (visitStats?.ok) {
@@ -1403,6 +1406,20 @@ function summarizeCustomerQuotes(quotes) {
   });
 }
 
+function getCustomerQuoteSummary() {
+  try {
+    const summary = JSON.parse(localStorage.getItem(STORAGE_KEYS.customerQuoteSummary) || "{}") || {};
+    return {
+      total: Number(summary.total || 0),
+      active: Number(summary.active || 0),
+      closed: Number(summary.closed || 0),
+      unselected: Number(summary.unselected || 0),
+    };
+  } catch (error) {
+    return { total: 0, active: 0, closed: 0, unselected: 0 };
+  }
+}
+
 function getSellerAccessLogs() {
   return readStorageArray(STORAGE_KEYS.sellerAccessLogs);
 }
@@ -1451,7 +1468,11 @@ function renderStats() {
   const approved = getApprovedSellers();
   const messages = getMessages();
   const customerQuotes = getCustomerQuotes();
-  const quoteSummary = summarizeCustomerQuotes(customerQuotes);
+  const loadedQuoteSummary = summarizeCustomerQuotes(customerQuotes);
+  const serverQuoteSummary = getCustomerQuoteSummary();
+  const quoteSummary = serverQuoteSummary.total >= loadedQuoteSummary.total
+    ? serverQuoteSummary
+    : loadedQuoteSummary;
   const pendingCount = applications.filter((row) => row.status === "pending").length;
   const readyMessages = messages.filter((row) => row.status === "ready" || row.status === "scheduled" || row.status === "sending" || row.status === "accepted").length;
   const sentMessages = messages.filter((row) => row.status === "sent").length;

@@ -1082,9 +1082,29 @@ async function getQuoteBids(env, quoteId) {
 
 async function getCustomerQuotes(env) {
   await ensureCustomerQuoteColumns(env);
-  const result = await env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all();
+  const now = new Date().toISOString();
+  const [result, summaryRow] = await Promise.all([
+    env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all(),
+    env.DB.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN TRIM(COALESCE(selected_bid_id, '')) <> '' OR status = 'selected' THEN 1 ELSE 0 END) AS selected,
+        SUM(CASE WHEN TRIM(COALESCE(selected_bid_id, '')) = '' AND status <> 'selected'
+                   AND (status = 'closed' OR (COALESCE(quote_expires_at, '') <> '' AND quote_expires_at <= ?)) THEN 1 ELSE 0 END) AS unselected,
+        SUM(CASE WHEN TRIM(COALESCE(selected_bid_id, '')) = '' AND status <> 'selected'
+                   AND status <> 'closed' AND (COALESCE(quote_expires_at, '') = '' OR quote_expires_at > ?) THEN 1 ELSE 0 END) AS active
+      FROM customer_quotes
+    `).bind(now, now).first(),
+  ]);
+  const summary = {
+    total: Number(summaryRow?.total || 0),
+    selected: Number(summaryRow?.selected || 0),
+    unselected: Number(summaryRow?.unselected || 0),
+    active: Number(summaryRow?.active || 0),
+  };
+  summary.closed = summary.selected + summary.unselected;
   const quotes = result.results || [];
-  if (!quotes.length) return json({ ok: true, rows: [] });
+  if (!quotes.length) return json({ ok: true, rows: [], summary });
 
   // 견적 100건을 조회할 때 건별로 이미지를 다시 읽으면 최대 200회 요청이 순차 발생합니다.
   // 목록 데이터는 두 번의 묶음 조회로 가져와 화면 응답 시간을 일정하게 유지합니다.
@@ -1111,7 +1131,7 @@ async function getCustomerQuotes(env) {
     return normalizeCustomerQuote({ ...quote, bid_count: bids.length, bids }, imagesByQuoteId.get(quote.id) || []);
   });
 
-  return json({ ok: true, rows });
+  return json({ ok: true, rows, summary });
 }
 
 async function ensureQuoteAuditAccessLogTable(env) {
