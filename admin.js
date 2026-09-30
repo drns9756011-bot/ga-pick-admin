@@ -42,6 +42,10 @@ let customerQuotesRefreshTimer = 0;
 let customerQuotesRefreshing = false;
 let adminQuoteSummaryKey = "";
 let customerQuoteSearchTerm = "";
+let customerQuoteStatusFilter = "all";
+let customerQuoteSort = "newest";
+let customerQuotePage = 1;
+const CUSTOMER_QUOTE_PAGE_SIZE = 25;
 const SELLER_CHANNELS = [
   "LG전자 BEST SHOP",
   "롯데하이마트",
@@ -227,8 +231,8 @@ function applyAdminPageView() {
     adminShell.id = "adminShell";
     adminShell.dataset.page = pageKey;
   }
-  if (adminHeaderTitle) adminHeaderTitle.textContent = config.heading;
-  if (adminHeaderCopy) adminHeaderCopy.textContent = config.copy;
+  if (adminHeaderTitle) adminHeaderTitle.textContent = config.title;
+  if (adminHeaderCopy) adminHeaderCopy.textContent = "";
 
   const visible = new Set(config.visible);
   ADMIN_SECTION_IDS.forEach((id) => {
@@ -250,10 +254,8 @@ customerQuoteSection.id = "customerQuotePanel";
 customerQuoteSection.innerHTML = `
   <div class="panel-head">
     <div>
-      <p class="eyebrow">Customer Quotes</p>
-      <h2>고객 견적 서버 저장 현황</h2>
+      <h2>견적 목록</h2>
     </div>
-    <p class="panel-note">고객 견적 저장 여부와 알림톡 발송 상태를 확인합니다.</p>
   </div>
   <div class="customer-quote-search" role="search" aria-label="고객 견적 검색">
     <label for="customerQuoteSearch">견적 검색</label>
@@ -263,13 +265,31 @@ customerQuoteSection.innerHTML = `
     </div>
     <p id="customerQuoteSearchSummary" aria-live="polite">전체 견적을 표시합니다.</p>
   </div>
+  <div class="ops-quote-filters">
+    <label>진행 상태 <select id="quoteStatusFilter"><option value="all">전체 상태</option><option value="quote-bidding">제안 접수</option><option value="quote-choosing">선택 대기</option><option value="quote-selected">선택 완료</option><option value="quote-closed">종료</option></select></label>
+    <label>정렬 <select id="quoteSort"><option value="newest">최근 등록순</option><option value="oldest">오래된 등록순</option><option value="bids">제안 많은 순</option></select></label>
+  </div>
+  <div class="ops-quote-columns" aria-hidden="true"><span>견적번호 / 등록일</span><span>고객</span><span>품목 / 브랜드</span><span>지역</span><span>제안</span><span>진행 상태</span></div>
   <div class="quote-admin-list" id="customerQuoteList"></div>
+  <div class="ops-pagination"><button type="button" class="ghost-btn" id="quotePrevious">이전</button><span id="quotePageLabel" aria-live="polite"></span><button type="button" class="ghost-btn" id="quoteNext">다음</button></div>
 `;
 document.querySelector("#statGrid")?.insertAdjacentElement("afterend", customerQuoteSection);
 const customerQuoteList = document.querySelector("#customerQuoteList");
 const customerQuoteSearch = document.querySelector("#customerQuoteSearch");
 const customerQuoteSearchClear = document.querySelector("#customerQuoteSearchClear");
 const customerQuoteSearchSummary = document.querySelector("#customerQuoteSearchSummary");
+document.querySelector("#quoteStatusFilter")?.addEventListener("change", (event) => {
+  customerQuoteStatusFilter = event.target.value;
+  customerQuotePage = 1;
+  renderCustomerQuotes();
+});
+document.querySelector("#quoteSort")?.addEventListener("change", (event) => {
+  customerQuoteSort = event.target.value;
+  customerQuotePage = 1;
+  renderCustomerQuotes();
+});
+document.querySelector("#quotePrevious")?.addEventListener("click", () => { customerQuotePage -= 1; renderCustomerQuotes(); });
+document.querySelector("#quoteNext")?.addEventListener("click", () => { customerQuotePage += 1; renderCustomerQuotes(); });
 const deletedQuoteList = null;
 
 const lplanSyncSection = document.createElement("section");
@@ -1369,8 +1389,7 @@ function renderDashboardWorkQueue() {
   dashboardHome.classList.add("system-work-queue");
   dashboardHome.innerHTML = `
     <div class="system-panel-head">
-      <div><span class="system-kicker">WORK QUEUE</span><h2>오늘 처리할 업무</h2></div>
-      <span class="system-panel-note">대기 건을 선택하면 해당 업무 화면으로 이동합니다.</span>
+      <div><h2>처리 대기 업무</h2></div>
     </div>
     <div class="system-work-table" role="table" aria-label="오늘 처리할 업무">
       <div class="system-work-row system-work-heading" role="row"><span>업무 구분</span><span>대기 건</span><span>처리 내용</span><span></span></div>
@@ -1513,7 +1532,15 @@ function renderStats() {
     { label: "종료 견적", value: `${quoteSummary.closed}건`, note: "시간 종료·선택 완료" },
     { label: "미선택", value: `${quoteSummary.unselected}건`, note: "판매자 미선택 견적" },
   ];
-  const stats = getCurrentAdminPageKey() === "customers" ? customerStats : dashboardStats;
+  const statsByPage = {
+    customers: customerStats,
+    sellers: [dashboardStats[2], dashboardStats[3], dashboardStats[6]],
+    approvedSellers: [dashboardStats[3], dashboardStats[4]],
+    sellerAccess: [dashboardStats[4]],
+    alimtalk: [dashboardStats[5], { label: "발송 완료", value: `${sentMessages}건`, note: "조회된 발송 기록" }, { label: "실패", value: `${messages.filter((row) => row.status === "failed").length}건`, note: "발송 결과 확인 필요" }],
+    brandHall: [{ label: "등록 패키지", value: `${getBrandPackagesAdmin().length}건`, note: "조회된 패키지" }, { label: "상담 접수", value: `${getBrandConsultationsAdmin().length}건`, note: "조회된 상담 내역" }],
+  };
+  const stats = statsByPage[getCurrentAdminPageKey()] || dashboardStats;
 
   statGrid.innerHTML = stats
     .map((stat) => {
@@ -1754,7 +1781,7 @@ function updateAdminQuoteCountdowns() {
     const quote = quotes.find((item) => String(item.id || "") === String(element.dataset.quoteId || ""));
     if (!quote) return;
     const status = quoteStatusMeta(quote);
-    element.textContent = `견적 상태 · ${status.label}`;
+    element.textContent = element.closest('.ops-quote-row') ? status.label : `견적 상태 · ${status.label}`;
     element.className = `status ${status.className}`;
     element.dataset.adminQuoteStatus = "";
     element.dataset.quoteId = quote.id;
@@ -1946,18 +1973,27 @@ function renderCustomerQuotes() {
   if (!customerQuoteList) return;
   const allQuotes = getCustomerQuotes();
   const searchTerm = customerQuoteSearchTerm.trim();
-  const quotes = searchTerm
+  const searchedQuotes = searchTerm
     ? allQuotes.filter((quote) => customerQuoteMatchesSearch(quote, searchTerm))
     : allQuotes;
+  const filteredQuotes = searchedQuotes.filter((quote) => customerQuoteStatusFilter === "all" || quoteStatusMeta(quote).className === customerQuoteStatusFilter);
+  filteredQuotes.sort((a, b) => customerQuoteSort === "bids"
+    ? Number(b.bidCount || b.bidsCount || 0) - Number(a.bidCount || a.bidsCount || 0)
+    : ((Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)) * (customerQuoteSort === "oldest" ? -1 : 1));
+  const pageCount = Math.max(1, Math.ceil(filteredQuotes.length / CUSTOMER_QUOTE_PAGE_SIZE));
+  customerQuotePage = Math.min(pageCount, Math.max(1, customerQuotePage));
+  const quotes = filteredQuotes.slice((customerQuotePage - 1) * CUSTOMER_QUOTE_PAGE_SIZE, customerQuotePage * CUSTOMER_QUOTE_PAGE_SIZE);
+  const openRecords = new Set([...customerQuoteList.querySelectorAll('details[open]')].map((record) => record.dataset.quoteRecord));
+  document.querySelector("#quotePageLabel").textContent = `${customerQuotePage} / ${pageCount} 페이지 · ${filteredQuotes.length}건`;
+  document.querySelector("#quotePrevious").disabled = customerQuotePage === 1;
+  document.querySelector("#quoteNext").disabled = customerQuotePage === pageCount;
 
   if (customerQuoteSearch && customerQuoteSearch.value !== customerQuoteSearchTerm) {
     customerQuoteSearch.value = customerQuoteSearchTerm;
   }
   if (customerQuoteSearchClear) customerQuoteSearchClear.hidden = !searchTerm;
   if (customerQuoteSearchSummary) {
-    customerQuoteSearchSummary.textContent = searchTerm
-      ? `검색 결과 ${quotes.length}건 · 전체 ${allQuotes.length}건`
-      : `전체 ${allQuotes.length}건`;
+    customerQuoteSearchSummary.textContent = `조회된 ${allQuotes.length}건 중 ${filteredQuotes.length}건`;
   }
 
   customerQuoteList.innerHTML = quotes.length
@@ -1970,6 +2006,15 @@ function renderCustomerQuotes() {
           ? "견적서 있음"
           : "유형 미입력";
       return `
+        <details class="ops-quote-record" data-quote-record="${escapeHTML(quote.id)}" ${openRecords.has(String(quote.id)) ? "open" : ""}>
+          <summary class="ops-quote-row">
+            <span><b>${escapeHTML(quote.quoteNumber || "-")}</b><small>${escapeHTML(formatDate(quote.createdAt))}</small></span>
+            <span><b>${escapeHTML(quote.customer || "-")}</b><small>${escapeHTML(formatPhoneNumber(quote.phone))}</small></span>
+            <span><b>${escapeHTML(quote.items || "품목 미입력")}</b><small>${escapeHTML(quote.desiredBrand || "미입력")}</small></span>
+            <span>${escapeHTML(quote.region || "미입력")}</span>
+            <span>${Number(quote.bidCount || quote.bidsCount || 0)}건</span>
+            <span class="status ${status.className}" data-admin-quote-status data-quote-id="${escapeHTML(quote.id)}">${escapeHTML(status.label)}</span>
+          </summary>
         <article class="quote-admin-card">
           <div class="quote-admin-thumb">
             ${quote.image || quote.thumbnailImage ? `<img src="${escapeHTML(quote.image || quote.thumbnailImage)}" alt="대표 견적 이미지" data-admin-quote-image data-fallback-src="${escapeHTML(quote.thumbnailImage || "")}" />` : `<span>이미지 없음</span>`}
@@ -2002,10 +2047,10 @@ function renderCustomerQuotes() {
               <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">견적 삭제</button>
             </div>
           </div>
-        </article>
+        </article></details>
       `;
     }).join("")
-    : searchTerm && allQuotes.length
+    : (searchTerm || customerQuoteStatusFilter !== "all") && allQuotes.length
       ? `
         <div class="empty-state">
           <strong>검색 결과가 없습니다.</strong>
@@ -2616,6 +2661,7 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("#customerQuoteSearchClear")) {
     customerQuoteSearchTerm = "";
+    customerQuotePage = 1;
     if (customerQuoteSearch) {
       customerQuoteSearch.value = "";
       customerQuoteSearch.focus();
@@ -2761,6 +2807,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target === customerQuoteSearch) {
     customerQuoteSearchTerm = event.target.value;
+    customerQuotePage = 1;
     renderCustomerQuotes();
     return;
   }
@@ -2930,7 +2977,6 @@ updateLastRefreshedDisplay();
 renderAll();
 visitStatsRefreshTimer = window.setInterval(refreshVisitStatsOnly, 5 * 60 * 1000);
 customerQuotesRefreshTimer = window.setInterval(refreshCustomerQuotesOnly, 30 * 1000);
-showToast("서버 데이터는 상단 새로고침 버튼을 눌렀을 때만 불러옵니다.");
 
 
 

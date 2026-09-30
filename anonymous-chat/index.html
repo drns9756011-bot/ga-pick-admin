@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>익명상담 채팅 관리</title>
     <link rel="stylesheet" href="/admin.css?v=20260823-operations-console-v1" />
-    <link rel="stylesheet" href="/admin-console.css?v=20260823-enterprise-v1" />
-    <link rel="stylesheet" href="/admin-enterprise-v6.css?v=20260823-erp-layout-v6" />
-    <link rel="stylesheet" href="/admin-system.css?v=20260826-sidebar-safe-v9" />
   <style>
     .chat-admin-wrap { max-width: 1440px; margin: 0 auto; padding: 28px; }
     .chat-admin-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 18px; }
@@ -23,8 +20,10 @@
     .chat-message small { display: block; margin-bottom: 5px; color: #687b8e; font-size: 11px; }
     @media (max-width: 760px) { .chat-admin-grid { grid-template-columns: 1fr; } .chat-messages { min-height: 360px; } }
   </style>
+<link rel="stylesheet" href="/admin-workspace.css?v=20260930-ops" />
+<script defer src="/admin-workspace.js?v=20260930-ops"></script>
 </head>
-<body>
+<body class="ops-console">
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="픽견적 관리자 홈"><span class="brand-mark">P</span><span>픽견적<small>관리자 콘솔</small></span></a>
           <nav class="side-nav" aria-label="관리자 메뉴">
@@ -45,7 +44,7 @@
       </nav>
   </aside>
   <main class="admin-shell"><div class="chat-admin-wrap">
-    <header class="admin-header"><div><p class="eyebrow">Anonymous Chat</p><h1>익명상담 채팅 관리</h1><p class="header-copy">고객과 판매자의 익명상담 채팅방과 메시지를 서버에서 확인합니다.</p></div><button class="primary-btn" id="refresh" type="button">새로고침</button></header>
+    <header class="admin-header"><div><h1>익명상담 채팅 관리</h1></div><button class="primary-btn" id="refresh" type="button">새로고침</button></header>
     <div class="chat-admin-grid"><section class="chat-admin-list" id="rooms"><p style="padding:20px">관리자 토큰을 입력하고 불러오세요.</p></section><section class="chat-admin-room" id="room"><div class="chat-room-head">채팅방을 선택하세요.</div><div class="chat-messages"></div></section></div>
   </div></main>
   <script>
