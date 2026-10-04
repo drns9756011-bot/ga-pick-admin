@@ -682,8 +682,8 @@ async function insertAlimtalkRow(env, row) {
 }
 
 async function updateAlimtalkDeliveryResult(env, id, result, options = {}) {
-  const sentAt = result.ok ? new Date().toISOString() : "";
-  const status = result.ok ? result.queueStatus || "accepted" : result.skipped ? "ready" : "failed";
+  const status = result.ok ? result.queueStatus || "accepted" : "failed";
+  const sentAt = status === "sent" ? new Date().toISOString() : "";
   await ensureAlimtalkColumns(env);
   const valuesByColumn = {
     status,
@@ -911,6 +911,39 @@ async function queueAlimtalk(env, message) {
 async function getSellerApplications(env) {
   const result = await env.DB.prepare("SELECT * FROM seller_applications ORDER BY requested_at DESC").all();
   return json({ ok: true, rows: result.results.map(normalizeSellerApplication) });
+}
+
+async function deleteRejectedSellerApplications(env, id = "") {
+  const filter = id ? "id = ? AND status = 'rejected'" : "status = 'rejected'";
+  const query = env.DB.prepare(`SELECT id, card_image_key FROM seller_applications WHERE ${filter}`);
+  const result = await (id ? query.bind(id) : query).all();
+  const rows = result.results || [];
+  if (id && !rows.length) return json({ ok: false, message: "반려된 신청을 찾을 수 없습니다." }, 404);
+  if (!rows.length) return json({ ok: true, deletedCount: 0 });
+
+  await ensureAlimtalkColumns(env);
+  const condition = id
+    ? "related_id IN (SELECT id FROM seller_applications WHERE id = ? AND status = 'rejected')"
+    : "related_id IN (SELECT id FROM seller_applications WHERE status = 'rejected')";
+  const deleteNotices = env.DB.prepare(`DELETE FROM alimtalk_queue WHERE ${condition}`);
+  const deleteApplications = env.DB.prepare(`DELETE FROM seller_applications WHERE ${filter}`);
+  const results = await env.DB.batch([
+    id ? deleteNotices.bind(id) : deleteNotices,
+    id ? deleteApplications.bind(id) : deleteApplications,
+  ]);
+
+  const imageKeys = [...new Set(rows.map((row) => row.card_image_key).filter(Boolean))];
+  const imageResults = env.FILES
+    ? await Promise.allSettled(imageKeys.map((key) => env.FILES.delete(key)))
+    : [];
+  const imageErrors = env.FILES
+    ? imageResults.filter((item) => item.status === "rejected").length
+    : imageKeys.length;
+  return json({
+    ok: true,
+    deletedCount: Number(results[1]?.meta?.changes || 0),
+    imageErrors,
+  });
 }
 
 async function updateSellerApplication(env, request, id) {
@@ -1487,6 +1520,53 @@ async function getAlimtalk(env) {
   return json({ ok: true, rows: result.results.map(normalizeMessage) });
 }
 
+function solapiMessageStatus(message) {
+  const code = String(message.statusCode || "");
+  if (code === "4000") return { status: "sent", error: "" };
+  if (code === "2000") return { status: "accepted", error: "" };
+  if (code.startsWith("3")) return { status: "sending", error: "" };
+  if (code) return { status: "failed", error: message.reason || message.statusMessage || `솔라피 상태 코드 ${code}` };
+  return null;
+}
+
+async function refreshAlimtalkStatus(env, id) {
+  await ensureAlimtalkColumns(env);
+  const existing = await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first();
+  if (!existing) return json({ ok: false, message: "알림톡 기록을 찾을 수 없습니다." }, 404);
+  const row = normalizeMessage(existing);
+  if (!row.solapiGroupId) {
+    return json({ ok: false, message: "솔라피 그룹 ID가 없어 발송 결과를 확인할 수 없습니다.", row }, 409);
+  }
+  if (!env.SOLAPI_API_KEY || !env.SOLAPI_API_SECRET) {
+    return json({ ok: false, message: "솔라피 조회 인증 정보가 설정되지 않았습니다." }, 503);
+  }
+
+  const date = new Date().toISOString();
+  const salt = createSolapiSalt();
+  const signature = await hmacSha256Hex(env.SOLAPI_API_SECRET, date + salt);
+  const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
+  const response = await fetch(
+    `https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapiGroupId)}/messages?limit=100`,
+    { headers: { Authorization: authorization } }
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return json({ ok: false, message: payload.errorMessage || payload.message || "솔라피 조회에 실패했습니다." }, response.status);
+  const messageList = payload.messageList || {};
+  const messages = Array.isArray(messageList) ? messageList : Object.values(messageList);
+  const message = row.solapiMessageId
+    ? messages.find((item) => item.messageId === row.solapiMessageId)
+    : messages.length === 1 ? messages[0] : null;
+  if (!message) return json({ ok: false, message: "해당 알림톡의 발송 결과를 찾지 못했습니다." }, 409);
+  const outcome = solapiMessageStatus(message);
+  if (!outcome) return json({ ok: false, message: "솔라피가 아직 최종 상태를 제공하지 않았습니다." }, 409);
+  const sentAt = outcome.status === "sent" ? (row.sentAt || message.dateReceived || new Date().toISOString()) : "";
+  await env.DB.prepare(
+    "UPDATE alimtalk_queue SET status = ?, sent_at = ?, error_message = ?, solapi_response_json = ? WHERE id = ?"
+  ).bind(outcome.status, sentAt, outcome.error, JSON.stringify({ latestMessage: message }), id).run();
+  const updated = await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first();
+  return json({ ok: true, row: normalizeMessage(updated) });
+}
+
 async function createAlimtalk(env, request) {
   const body = await request.json();
   await queueAlimtalk(env, body);
@@ -1926,6 +2006,10 @@ export async function onRequest(context) {
     return handleSubscriptionImport(() => cancelSubscriptionProductImport(env, decodeURIComponent(pathParts.slice(2).join("/"))));
   }
   if (path === "seller-applications" && method === "GET") return getSellerApplications(env);
+  if (path === "seller-applications/rejected" && method === "DELETE") return deleteRejectedSellerApplications(env);
+  if (path.startsWith("seller-applications/") && method === "DELETE") {
+    return deleteRejectedSellerApplications(env, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
   if (path.startsWith("seller-applications/") && method === "PATCH") {
     return updateSellerApplication(env, request, decodeURIComponent(pathParts.slice(1).join("/")));
   }
@@ -1970,6 +2054,9 @@ export async function onRequest(context) {
   if (path === "alimtalk" && method === "POST") return createAlimtalk(env, request);
   if (path.startsWith("alimtalk/") && path.endsWith("/resend") && method === "POST") {
     return resendAlimtalk(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
+  if (path.startsWith("alimtalk/") && path.endsWith("/refresh") && method === "POST") {
+    return refreshAlimtalkStatus(env, decodeURIComponent(pathParts.slice(1, -1).join("/")));
   }
   if (path.startsWith("alimtalk/") && method === "PATCH") {
     return updateAlimtalk(env, request, decodeURIComponent(pathParts.slice(1).join("/")));

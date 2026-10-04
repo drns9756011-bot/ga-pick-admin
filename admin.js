@@ -31,6 +31,7 @@ if (!document.querySelector('.side-nav a[href="/subscription-products"]')) {
 let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
+let messageStatusSyncPromise = null;
 let messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
 let customerQuoteSyncError = "";
 let lplanSyncError = "";
@@ -67,6 +68,12 @@ const sellerAccessSummary = document.querySelector("#sellerAccessSummary");
 const sellerAccessSearch = document.querySelector("#sellerAccessSearch");
 const sellerAccessDays = document.querySelector("#sellerAccessDays");
 const messageList = document.querySelector("#messageList");
+const alimtalkSyncButton = document.createElement("button");
+alimtalkSyncButton.id = "alimtalkSyncBtn";
+alimtalkSyncButton.type = "button";
+alimtalkSyncButton.className = "ghost-btn";
+alimtalkSyncButton.textContent = "발송 결과 동기화";
+document.querySelector("#alimtalkControl .panel-head")?.append(alimtalkSyncButton);
 const toast = document.querySelector("#toast");
 const refreshBtn = document.querySelector("#refreshBtn");
 const adminAuthBtn = document.querySelector("#adminAuthBtn");
@@ -219,6 +226,7 @@ function navigateAdminPage(pageKey, options = {}) {
     window.history[historyMethod]({ adminPage: pageKey }, "", config.path);
   }
   renderAll();
+  if (pageKey === "alimtalk") void refreshAlimtalkPage();
   if (!options.keepScroll) window.scrollTo({ top: 0, behavior: "auto" });
 }
 
@@ -612,6 +620,7 @@ async function loadVisitStatsFromServer(options = {}) {
 }
 
 async function refreshVisitStatsOnly() {
+  if (document.hidden || getCurrentAdminPageKey() !== "dashboard") return;
   const result = await loadVisitStatsFromServer({ silent: true });
   if (!result?.ok) return;
   localStorage.setItem(STORAGE_KEYS.visitStats, JSON.stringify(result));
@@ -619,7 +628,7 @@ async function refreshVisitStatsOnly() {
 }
 
 async function refreshCustomerQuotesOnly() {
-  if (customerQuotesRefreshing || document.hidden) return;
+  if (customerQuotesRefreshing || document.hidden || getCurrentAdminPageKey() !== "customers") return;
   customerQuotesRefreshing = true;
   try {
     const result = await loadCustomerQuotesFromServer({ silent: true });
@@ -800,6 +809,7 @@ async function loadAdminDataFromServer(options = {}) {
       localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
       updateLastRefreshedDisplay(refreshedAt);
       renderAll();
+      if (messages?.ok && getCurrentAdminPageKey() === "alimtalk") void syncPendingMessageStatuses();
       return { ok: true, updatedCount };
     }
 
@@ -857,13 +867,59 @@ async function refreshMessageStatus(messageId) {
   const result = await apiJson(`/api/alimtalk/${encodeURIComponent(messageId)}/refresh`, {
     method: "POST",
   });
-  if (result?.row) {
-    updateMessage(messageId, (message) => Object.assign(message, result.row));
-  } else if (!result?.ok) {
+  if (!result?.ok) {
     showToast(result?.message || "알림톡 상태 확인에 실패했습니다.");
     return;
   }
+  if (result.row) updateMessage(messageId, (message) => Object.assign(message, result.row));
   showToast("알림톡 최종 상태를 확인했습니다.");
+}
+
+function syncPendingMessageStatuses() {
+  if (messageStatusSyncPromise) return messageStatusSyncPromise;
+  const candidates = getMessages().filter((message) =>
+    message.solapiGroupId && ["ready", "accepted", "sending"].includes(message.status)
+  );
+  if (!candidates.length) return Promise.resolve();
+  const button = document.querySelector("#alimtalkSyncBtn");
+  if (button) button.disabled = true;
+  messageStatusSyncPromise = (async () => {
+    const updated = new Map();
+    let failed = 0;
+    let next = 0;
+    const workers = Array.from({ length: Math.min(4, candidates.length) }, async () => {
+      while (next < candidates.length) {
+        const message = candidates[next++];
+        const result = await apiJson(`/api/alimtalk/${encodeURIComponent(message.id)}/refresh`, {
+          method: "POST", silent: true,
+        });
+        if (result?.ok && result.row) updated.set(message.id, result.row);
+        else failed += 1;
+        if (button) button.textContent = `발송 결과 확인 ${updated.size + failed}/${candidates.length}`;
+      }
+    });
+    await Promise.all(workers);
+    if (updated.size) {
+      setMessages(getMessages().map((message) => updated.get(message.id) || message));
+      renderAll();
+    }
+    showToast(`발송 결과 ${updated.size}건 갱신${failed ? ` · ${failed}건 확인 불가` : ""}`);
+  })().finally(() => {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "발송 결과 동기화";
+    }
+    messageStatusSyncPromise = null;
+  });
+  return messageStatusSyncPromise;
+}
+
+async function refreshAlimtalkPage() {
+  const result = await loadAlimtalkMessagesFromServer({ silent: true });
+  if (!result?.ok || !Array.isArray(result.rows)) return;
+  setMessages(result.rows);
+  renderAll();
+  await syncPendingMessageStatuses();
 }
 
 async function deleteMessage(messageId) {
@@ -1278,9 +1334,9 @@ function statusLabel(status) {
     pending: "승인 대기",
     approved: "승인",
     rejected: "반려",
-    ready: "발송 대기",
+    ready: "결과 미확인",
     scheduled: "오전 9시 예약",
-    accepted: "접수됨",
+    accepted: "발송 접수",
     sending: "전송중",
     sent: "발송완료",
     failed: "발송실패",
@@ -1562,8 +1618,11 @@ function renderApplications() {
   const rows = getFilteredApplications();
   const selected = getSelectedApplication();
   selectedApplicationId = selected?.id || "";
+  const rejectedCount = getApplications().filter((application) => application.status === "rejected").length;
 
-  applicationList.innerHTML = rows.length
+  applicationList.innerHTML = `${applicationFilter === "rejected" && rejectedCount
+    ? `<div class="application-bulk-actions"><button class="danger-btn small-btn" type="button" data-delete-all-rejected>반려 내역 전체 삭제 (${rejectedCount}건)</button></div>`
+    : ""}${rows.length
     ? rows.map((application) => `
       <button class="application-card${application.id === selectedApplicationId ? " is-active" : ""}" type="button" data-application-id="${escapeHTML(application.id)}">
         <div class="card-top">
@@ -1582,7 +1641,7 @@ function renderApplications() {
         <strong>표시할 판매자 신청이 없습니다.</strong>
         <p>판매자 등록 요청이 접수되면 이 목록에서 승인 또는 반려할 수 있습니다.</p>
       </div>
-    `;
+    `}`;
 
   renderApplicationDetail(selected);
 }
@@ -1631,9 +1690,35 @@ function renderApplicationDetail(application) {
         <button class="primary-btn" type="button" data-approve-application="${escapeHTML(application.id)}" ${isPending ? "" : "disabled"}>승인</button>
         <button class="danger-btn" type="button" data-reject-application="${escapeHTML(application.id)}" ${isPending ? "" : "disabled"}>반려</button>
         <button class="ghost-btn" type="button" data-queue-application-talk="${escapeHTML(application.id)}" ${application.status === "rejected" ? "" : "disabled"}>반려 알림 재발송</button>
+        ${application.status === "rejected" ? `<button class="danger-btn" type="button" data-delete-rejected-application="${escapeHTML(application.id)}">반려 내역 삭제</button>` : ""}
       </div>
     </div>
   `;
+}
+
+async function deleteRejectedApplication(applicationId) {
+  const row = getApplications().find((application) => application.id === applicationId && application.status === "rejected");
+  if (!row || !window.confirm(`${sellerName(row) || row.sellerId} 반려 내역을 서버에서 완전히 삭제할까요?\n관련 알림 기록과 명함 이미지도 삭제되며 복구할 수 없습니다.`)) return;
+  const result = await apiJson(`/api/seller-applications/${encodeURIComponent(applicationId)}`, { method: "DELETE" });
+  if (!result?.ok) return showToast(result?.message || "반려 내역 삭제에 실패했습니다.");
+  setApplications(getApplications().filter((application) => application.id !== applicationId));
+  setMessages(getMessages().filter((message) => message.relatedId !== applicationId));
+  selectedApplicationId = "";
+  renderAll();
+  showToast(result.imageErrors ? "신청은 삭제됐지만 일부 이미지 삭제를 확인해야 합니다." : "반려 내역을 서버에서 삭제했습니다.");
+}
+
+async function deleteAllRejectedApplications() {
+  const rows = getApplications().filter((application) => application.status === "rejected");
+  if (!rows.length || !window.confirm(`반려 내역 ${rows.length}건을 서버에서 모두 삭제할까요?\n관련 알림 기록과 명함 이미지도 삭제되며 복구할 수 없습니다.`)) return;
+  const result = await apiJson("/api/seller-applications/rejected", { method: "DELETE" });
+  if (!result?.ok) return showToast(result?.message || "반려 내역 삭제에 실패했습니다.");
+  const ids = new Set(rows.map((row) => row.id));
+  setApplications(getApplications().filter((application) => !ids.has(application.id)));
+  setMessages(getMessages().filter((message) => !ids.has(message.relatedId)));
+  selectedApplicationId = "";
+  renderAll();
+  showToast(result.imageErrors ? `${result.deletedCount}건 삭제 · 이미지 ${result.imageErrors}건 확인 필요` : `반려 내역 ${result.deletedCount}건을 삭제했습니다.`);
 }
 
 async function approveApplication(applicationId) {
@@ -2189,12 +2274,13 @@ function renderMessages() {
           </div>
           <p>${escapeHTML(message.body || "")}</p>
           <p class="meta-line">템플릿 ${escapeHTML(message.templateId || "미지정")}</p>
-          ${message.errorMessage ? `<p class="error-line">실패 사유: ${escapeHTML(message.errorMessage)}</p>` : ""}
+          ${message.errorMessage ? `<p class="error-line">${message.status === "failed" ? "실패 사유" : "확인 사항"}: ${escapeHTML(message.errorMessage)}</p>` : ""}
+          ${message.status === "ready" && !message.solapiGroupId ? `<p class="error-line">발송 결과 조회 ID가 없어 전송 여부를 확인할 수 없습니다.</p>` : ""}
           ${solapiSummary ? `<p class="meta-line">솔라피 응답: ${escapeHTML(solapiSummary)}</p>` : ""}
           <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.scheduledAt ? ` · 예약 ${escapeHTML(formatDate(message.scheduledAt))}` : ""}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
           <div class="message-actions">
             <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}" ${isFutureScheduled ? "disabled title=\"예약 발송 시각 이후에 사용할 수 있습니다.\"" : ""}>${isFutureScheduled ? "예약 대기" : "재발송 요청"}</button>
-            <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}">상태 확인</button>
+            <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}" ${message.solapiGroupId ? "" : "disabled title=\"솔라피 조회 ID가 없습니다.\""}>상태 확인</button>
             <button class="danger-btn small-btn" type="button" data-delete-message="${escapeHTML(message.id)}">삭제</button>
           </div>
         </article>
@@ -2633,17 +2719,30 @@ function renderBrandHallAdmin() {
 }
 
 function renderAll() {
+  const pageKey = getCurrentAdminPageKey();
   renderStatsCards();
-  renderDashboardWorkQueue();
-  renderLplanSyncPanel();
-  renderCustomerQuotes();
-  renderApplications();
-  renderApprovedSellers();
-  renderBrandHallAdmin();
-  renderSellerAccessLogs();
-  renderMessages();
+  if (pageKey === "dashboard") {
+    renderDashboardWorkQueue();
+    renderLplanSyncPanel();
+  } else if (pageKey === "customers") {
+    renderCustomerQuotes();
+  } else if (pageKey === "sellers") {
+    renderApplications();
+  } else if (pageKey === "approvedSellers") {
+    renderApprovedSellers();
+  } else if (pageKey === "brandHall") {
+    renderBrandHallAdmin();
+  } else if (pageKey === "sellerAccess") {
+    renderSellerAccessLogs();
+  } else if (pageKey === "alimtalk") {
+    renderMessages();
+  }
   applyAdminPageView();
-  startAdminQuoteCountdownTimer();
+  if (pageKey === "customers") startAdminQuoteCountdownTimer();
+  else if (adminQuoteCountdownTimer) {
+    window.clearInterval(adminQuoteCountdownTimer);
+    adminQuoteCountdownTimer = 0;
+  }
 
   document.querySelectorAll("[data-application-filter]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.applicationFilter === applicationFilter);
@@ -2680,6 +2779,20 @@ document.addEventListener("click", (event) => {
   if (applicationCard) {
     selectedApplicationId = applicationCard.dataset.applicationId;
     renderApplications();
+    return;
+  }
+
+  const deleteRejectedButton = event.target.closest("[data-delete-rejected-application]");
+  if (deleteRejectedButton) {
+    deleteRejectedApplication(deleteRejectedButton.dataset.deleteRejectedApplication);
+    return;
+  }
+  if (event.target.closest("[data-delete-all-rejected]")) {
+    deleteAllRejectedApplications();
+    return;
+  }
+  if (event.target.closest("#alimtalkSyncBtn")) {
+    syncPendingMessageStatuses();
     return;
   }
 
@@ -2975,6 +3088,7 @@ if (initialApplicationIdFromUrl) {
 
 updateLastRefreshedDisplay();
 renderAll();
+if (getCurrentAdminPageKey() === "alimtalk") void refreshAlimtalkPage();
 visitStatsRefreshTimer = window.setInterval(refreshVisitStatsOnly, 5 * 60 * 1000);
 customerQuotesRefreshTimer = window.setInterval(refreshCustomerQuotesOnly, 30 * 1000);
 
