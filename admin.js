@@ -887,10 +887,11 @@ function syncPendingMessageStatuses(options = {}) {
     let cursor = "";
     let checked = 0;
     let updated = 0;
+    let missing = 0;
     do {
       const result = await apiJson("/api/alimtalk/refresh-batch", {
         method: "POST", silent: true,
-        body: JSON.stringify({ cursor, limit: 50 }),
+        body: JSON.stringify({ cursor, limit: options.all ? 100 : 10 }),
       });
       if (!result?.ok) {
         showToast(result?.message || "발송 결과 동기화에 실패했습니다.");
@@ -898,6 +899,7 @@ function syncPendingMessageStatuses(options = {}) {
       }
       checked += Number(result.checked || 0);
       updated += Number(result.updated || 0);
+      missing += Number(result.missing || 0);
       cursor = result.nextCursor || "";
       if (button) button.textContent = `발송 결과 확인 ${checked}건`;
     } while (options.all && cursor);
@@ -908,7 +910,7 @@ function syncPendingMessageStatuses(options = {}) {
         renderAll();
       }
     }
-    if (options.all) showToast(`발송 결과 ${updated}건 갱신 · ${checked}건 확인`);
+    if (options.all) showToast(`발송 결과 ${updated}건 갱신 · ${checked}건 확인${missing ? ` · 미확인 ${missing}건` : ""}`);
   })().finally(() => {
     if (button) {
       button.disabled = false;

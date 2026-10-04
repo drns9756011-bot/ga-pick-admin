@@ -1581,13 +1581,13 @@ async function refreshPendingAlimtalkBatch(env, request) {
   let cursor = [];
   try { cursor = JSON.parse(String(body.cursor || "[]")); } catch { cursor = []; }
   if (!Array.isArray(cursor) || cursor.length !== 2) cursor = [];
-  const limit = Math.min(50, Math.max(1, Number(body.limit) || 50));
+  const limit = Math.min(100, Math.max(1, Number(body.limit) || 10));
   const query = cursor.length
-    ? env.DB.prepare(`SELECT id, solapi_message_id, created_at, sent_at FROM alimtalk_queue
+    ? env.DB.prepare(`SELECT id, status, solapi_group_id, solapi_message_id, created_at, sent_at FROM alimtalk_queue
         WHERE status IN ('ready', 'accepted', 'sending') AND solapi_message_id != ''
           AND (created_at < ? OR (created_at = ? AND id < ?))
         ORDER BY created_at DESC, id DESC LIMIT ?`).bind(cursor[0], cursor[0], cursor[1], limit)
-    : env.DB.prepare(`SELECT id, solapi_message_id, created_at, sent_at FROM alimtalk_queue
+    : env.DB.prepare(`SELECT id, status, solapi_group_id, solapi_message_id, created_at, sent_at FROM alimtalk_queue
         WHERE status IN ('ready', 'accepted', 'sending') AND solapi_message_id != ''
         ORDER BY created_at DESC, id DESC LIMIT ?`).bind(limit);
   const result = await query.all();
@@ -1600,21 +1600,38 @@ async function refreshPendingAlimtalkBatch(env, request) {
   const salt = createSolapiSalt();
   const signature = await hmacSha256Hex(env.SOLAPI_API_SECRET, date + salt);
   const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
-  const ids = rows.map((row) => row.solapi_message_id);
-  const url = new URL("https://api.solapi.com/messages/v4/list");
-  url.searchParams.set("messageIds", JSON.stringify(ids));
-  url.searchParams.set("limit", String(ids.length));
-  const response = await fetch(url, { headers: { Authorization: authorization } });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) return json({ ok: false, message: payload.errorMessage || payload.message || "솔라피 다건 조회에 실패했습니다." }, response.status);
-  const messages = payload.messageList || {};
+  const oldest = new Date(rows.at(-1).created_at);
+  const newest = new Date(rows[0].created_at);
+  if (Number.isNaN(oldest.valueOf()) || Number.isNaN(newest.valueOf())) {
+    return json({ ok: false, message: "알림톡 기록의 생성 시각을 확인할 수 없습니다." }, 409);
+  }
+  const messages = {};
+  const missing = new Set(rows.map((row) => row.solapi_message_id).filter(Boolean));
+  let startKey = "";
+  for (let page = 0; page < 5 && missing.size; page += 1) {
+    const url = new URL("https://api.solapi.com/messages/v4/list");
+    url.searchParams.set("startDate", new Date(oldest.getTime() - 86_400_000).toISOString());
+    url.searchParams.set("endDate", new Date(newest.getTime() + 86_400_000).toISOString());
+    url.searchParams.set("limit", "500");
+    if (startKey) url.searchParams.set("startKey", startKey);
+    const response = await fetch(url, { headers: { Authorization: authorization } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return json({ ok: false, message: payload.errorMessage || payload.message || "솔라피 목록 조회에 실패했습니다." }, 502);
+    Object.assign(messages, payload.messageList || {});
+    for (const id of missing) if (messages[id]) missing.delete(id);
+    if (!payload.nextKey || payload.nextKey === startKey) break;
+    startKey = payload.nextKey;
+  }
   const statements = [];
+  let matched = 0;
   for (const row of rows) {
     const message = messages[row.solapi_message_id];
     if (!message) continue;
+    matched += 1;
     const outcome = solapiMessageStatus(message);
     if (!outcome) continue;
     const sentAt = outcome.status === "sent" ? (row.sent_at || message.dateReceived || message.dateReported || new Date().toISOString()) : "";
+    if (outcome.status === row.status && sentAt === (row.sent_at || "")) continue;
     statements.push(env.DB.prepare("UPDATE alimtalk_queue SET status = ?, sent_at = ?, error_message = ? WHERE id = ?")
       .bind(outcome.status, sentAt, outcome.error, row.id));
   }
@@ -1624,6 +1641,8 @@ async function refreshPendingAlimtalkBatch(env, request) {
     ok: true,
     checked: rows.length,
     updated: statements.length,
+    matched,
+    missing: missing.size,
     nextCursor: rows.length === limit ? JSON.stringify([last.created_at, last.id]) : null,
   });
 }
@@ -2129,4 +2148,3 @@ export async function onRequest(context) {
 
   return json({ ok: false, message: "API를 찾을 수 없습니다." }, 404);
 }
-

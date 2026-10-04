@@ -26,7 +26,7 @@ function makeEnv() {
         return {
           bind(...values) { params = values; return this; },
           async all() {
-            if (sql.includes("SELECT id, solapi_message_id, created_at, sent_at FROM alimtalk_queue")) {
+            if (sql.includes("SELECT id, status, solapi_group_id, solapi_message_id, created_at, sent_at FROM alimtalk_queue")) {
               return { results: [message] };
             }
             if (sql.includes("SELECT id, card_image_key FROM seller_applications")) {
@@ -126,7 +126,7 @@ test("Solapi delivery result changes accepted to sent", async () => {
   }
 });
 
-test("batch reconciliation checks multiple message IDs in one Solapi request", async () => {
+test("batch reconciliation checks messages in one date-bounded Solapi list request", async () => {
   const state = makeEnv();
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -134,7 +134,7 @@ test("batch reconciliation checks multiple message IDs in one Solapi request", a
     calls += 1;
     const target = new URL(url);
     assert.equal(target.pathname, "/messages/v4/list");
-    assert.deepEqual(JSON.parse(target.searchParams.get("messageIds")), ["message-1"]);
+    assert.equal(target.searchParams.get("limit"), "500");
     return new Response(JSON.stringify({ messageList: { "message-1": { messageId: "message-1", statusCode: "4000" } } }), { status: 200 });
   };
   try {
