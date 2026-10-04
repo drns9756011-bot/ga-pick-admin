@@ -1537,6 +1537,10 @@ async function updateApprovedSeller(env, request, id) {
 
   values.push(id);
   await env.DB.prepare(`UPDATE approved_sellers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  if (Object.prototype.hasOwnProperty.call(body, "password")) {
+    const sessionsTable = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'seller_sessions'").first();
+    if (sessionsTable) await env.DB.prepare("DELETE FROM seller_sessions WHERE seller_id = ?").bind(existing.seller_id).run();
+  }
   const row = normalizeApprovedSeller(
     await env.DB.prepare("SELECT * FROM approved_sellers WHERE id = ?").bind(id).first()
   );
@@ -1545,9 +1549,11 @@ async function updateApprovedSeller(env, request, id) {
 }
 
 async function deleteApprovedSeller(env, id) {
-  const existing = await env.DB.prepare("SELECT id FROM approved_sellers WHERE id = ?").bind(id).first();
+  const existing = await env.DB.prepare("SELECT id, seller_id FROM approved_sellers WHERE id = ?").bind(id).first();
   if (!existing) return json({ ok: false, message: "승인 판매자를 찾을 수 없습니다." }, 404);
 
+  const sessionsTable = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'seller_sessions'").first();
+  if (sessionsTable) await env.DB.prepare("DELETE FROM seller_sessions WHERE seller_id = ?").bind(existing.seller_id).run();
   await env.DB.prepare("DELETE FROM approved_sellers WHERE id = ?").bind(id).run();
   return json({ ok: true, id });
 }

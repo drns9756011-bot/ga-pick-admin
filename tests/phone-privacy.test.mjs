@@ -23,10 +23,14 @@ function d1(db) {
   };
 }
 
-async function call(env, path, method = "GET", headers = {}) {
+async function call(env, path, method = "GET", headers = {}, body) {
   const response = await onRequest({
     env,
-    request: new Request(`https://admin.example/api/${path}`, { method, headers }),
+    request: new Request(`https://admin.example/api/${path}`, {
+      method,
+      headers: body ? { ...headers, "Content-Type": "application/json" } : headers,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }),
     params: { path: path.split("/") },
   });
   return { status: response.status, body: await response.json() };
@@ -54,5 +58,28 @@ test("admin list is masked and reveal needs fresh token before day seven", async
   assert.equal((await call(env, "customer-quotes/q1/phone", "POST", {
     "X-Admin-Token": env.ADMIN_API_TOKEN, "X-Admin-Reauth": env.ADMIN_API_TOKEN,
   })).status, 410);
+  db.close();
+});
+
+test("changing or deleting a seller revokes existing sessions", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
+  db.exec("CREATE TABLE seller_sessions (token_hash TEXT PRIMARY KEY, seller_id TEXT NOT NULL)");
+  db.prepare(`INSERT INTO approved_sellers
+    (id, seller_id, password, channel, branch, branch_region, manager, phone, approved_at)
+    VALUES ('s1', 'seller-1', 'old-password', 'channel', 'branch', 'region', 'manager', '01012345678', ?)`)
+    .run(new Date().toISOString());
+  const env = { DB: d1(db), ADMIN_API_TOKEN: "admin-test-token" };
+  const headers = { "X-Admin-Token": env.ADMIN_API_TOKEN };
+
+  db.prepare("INSERT INTO seller_sessions VALUES ('session-1', 'seller-1')").run();
+  const changed = await call(env, "approved-sellers/s1", "PATCH", headers, { password: "new-password" });
+  assert.equal(changed.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM seller_sessions").get().count, 0);
+
+  db.prepare("INSERT INTO seller_sessions VALUES ('session-2', 'seller-1')").run();
+  const deleted = await call(env, "approved-sellers/s1", "DELETE", headers);
+  assert.equal(deleted.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM seller_sessions").get().count, 0);
   db.close();
 });
