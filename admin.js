@@ -32,6 +32,8 @@ let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
 let messageStatusSyncPromise = null;
+let messageSummary = null;
+let messageHasMore = false;
 let messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
 let customerQuoteSyncError = "";
 let lplanSyncError = "";
@@ -583,6 +585,8 @@ async function loadAlimtalkMessagesFromServer(options = {}) {
   const result = await apiJson(`/api/alimtalk?ts=${timestamp}`, requestOptions);
   if (result?.ok && Array.isArray(result.rows)) {
     messageSyncError = "";
+    messageSummary = result.summary || null;
+    messageHasMore = Boolean(result.hasMore);
     return result;
   }
   messageSyncError = result?.message || "알림톡 기록을 관리자 서버에서 불러오지 못했습니다.";
@@ -875,35 +879,36 @@ async function refreshMessageStatus(messageId) {
   showToast("알림톡 최종 상태를 확인했습니다.");
 }
 
-function syncPendingMessageStatuses() {
+function syncPendingMessageStatuses(options = {}) {
   if (messageStatusSyncPromise) return messageStatusSyncPromise;
-  const candidates = getMessages().filter((message) =>
-    message.solapiGroupId && ["ready", "accepted", "sending"].includes(message.status)
-  );
-  if (!candidates.length) return Promise.resolve();
   const button = document.querySelector("#alimtalkSyncBtn");
   if (button) button.disabled = true;
   messageStatusSyncPromise = (async () => {
-    const updated = new Map();
-    let failed = 0;
-    let next = 0;
-    const workers = Array.from({ length: Math.min(4, candidates.length) }, async () => {
-      while (next < candidates.length) {
-        const message = candidates[next++];
-        const result = await apiJson(`/api/alimtalk/${encodeURIComponent(message.id)}/refresh`, {
-          method: "POST", silent: true,
-        });
-        if (result?.ok && result.row) updated.set(message.id, result.row);
-        else failed += 1;
-        if (button) button.textContent = `발송 결과 확인 ${updated.size + failed}/${candidates.length}`;
+    let cursor = "";
+    let checked = 0;
+    let updated = 0;
+    do {
+      const result = await apiJson("/api/alimtalk/refresh-batch", {
+        method: "POST", silent: true,
+        body: JSON.stringify({ cursor, limit: 50 }),
+      });
+      if (!result?.ok) {
+        showToast(result?.message || "발송 결과 동기화에 실패했습니다.");
+        return;
       }
-    });
-    await Promise.all(workers);
-    if (updated.size) {
-      setMessages(getMessages().map((message) => updated.get(message.id) || message));
-      renderAll();
+      checked += Number(result.checked || 0);
+      updated += Number(result.updated || 0);
+      cursor = result.nextCursor || "";
+      if (button) button.textContent = `발송 결과 확인 ${checked}건`;
+    } while (options.all && cursor);
+    if (checked) {
+      const latest = await loadAlimtalkMessagesFromServer({ silent: true });
+      if (latest?.ok && Array.isArray(latest.rows)) {
+        setMessages(latest.rows);
+        renderAll();
+      }
     }
-    showToast(`발송 결과 ${updated.size}건 갱신${failed ? ` · ${failed}건 확인 불가` : ""}`);
+    if (options.all) showToast(`발송 결과 ${updated}건 갱신 · ${checked}건 확인`);
   })().finally(() => {
     if (button) {
       button.disabled = false;
@@ -1439,7 +1444,10 @@ function renderDashboardWorkQueue() {
     { label: "고객 견적", count: quotes.filter((quote) => ["quote-bidding", "quote-choosing"].includes(quoteStatusMeta(quote).className)).length, note: "진행 중 견적을 확인하고 제안 현황을 관리합니다.", href: "/customers", page: "customers", action: "견적 관리" },
     { label: "판매자 승인", count: applications.filter((application) => application.status === "pending").length, note: "검토 대기 중인 판매자 등록 요청입니다.", href: "/sellers", page: "sellers", action: "승인 검토" },
     { label: "브랜드관 상담", count: consultations.filter((consultation) => ["new", "contacted", "negotiating"].includes(String(consultation.status || "new"))).length, note: "계약 및 정산 전 상담 요청을 확인합니다.", href: "/brand-hall", page: "brandHall", action: "상담 관리" },
-    { label: "알림톡 발송", count: messages.filter((message) => ["ready", "scheduled", "sending", "accepted", "failed"].includes(String(message.status || ""))).length, note: "대기 또는 확인이 필요한 발송 건입니다.", href: "/alimtalk", page: "alimtalk", action: "발송 현황" },
+    { label: "알림톡 발송", count: messageSummary
+      ? ["ready", "scheduled", "sending", "accepted", "failed"].reduce((sum, status) => sum + Number(messageSummary[status] || 0), 0)
+      : messages.filter((message) => ["ready", "scheduled", "sending", "accepted", "failed"].includes(String(message.status || ""))).length,
+      note: "대기 또는 확인이 필요한 발송 건입니다.", href: "/alimtalk", page: "alimtalk", action: "발송 현황" },
   ];
 
   dashboardHome.classList.add("system-work-queue");
@@ -1549,8 +1557,10 @@ function renderStats() {
     ? serverQuoteSummary
     : loadedQuoteSummary;
   const pendingCount = applications.filter((row) => row.status === "pending").length;
-  const readyMessages = messages.filter((row) => row.status === "ready" || row.status === "scheduled" || row.status === "sending" || row.status === "accepted").length;
-  const sentMessages = messages.filter((row) => row.status === "sent").length;
+  const readyMessages = messageSummary
+    ? ["ready", "scheduled", "sending", "accepted"].reduce((count, status) => count + Number(messageSummary[status] || 0), 0)
+    : messages.filter((row) => ["ready", "scheduled", "sending", "accepted"].includes(row.status)).length;
+  const sentMessages = messageSummary ? Number(messageSummary.sent || 0) : messages.filter((row) => row.status === "sent").length;
   const rejectedCount = applications.filter((row) => row.status === "rejected").length;
   const visitStats = getVisitStats();
   const todayVisitors = Number(visitStats.today?.uniqueVisitors || 0);
@@ -1593,7 +1603,7 @@ function renderStats() {
     sellers: [dashboardStats[2], dashboardStats[3], dashboardStats[6]],
     approvedSellers: [dashboardStats[3], dashboardStats[4]],
     sellerAccess: [dashboardStats[4]],
-    alimtalk: [dashboardStats[5], { label: "발송 완료", value: `${sentMessages}건`, note: "조회된 발송 기록" }, { label: "실패", value: `${messages.filter((row) => row.status === "failed").length}건`, note: "발송 결과 확인 필요" }],
+    alimtalk: [dashboardStats[5], { label: "발송 완료", value: `${sentMessages}건`, note: "전체 발송 기록" }, { label: "실패", value: `${messageSummary ? Number(messageSummary.failed || 0) : messages.filter((row) => row.status === "failed").length}건`, note: "발송 결과 확인 필요" }],
     brandHall: [{ label: "등록 패키지", value: `${getBrandPackagesAdmin().length}건`, note: "조회된 패키지" }, { label: "상담 접수", value: `${getBrandConsultationsAdmin().length}건`, note: "조회된 상담 내역" }],
   };
   const stats = statsByPage[getCurrentAdminPageKey()] || dashboardStats;
@@ -2292,6 +2302,19 @@ function renderMessages() {
         <p>견적 등록, 제안 도착, 판매자 등록 요청 등 자동 발송 기록이 이곳에 표시됩니다.</p>
       </div>
     `;
+  if (messageHasMore) {
+    messageList.insertAdjacentHTML("beforeend", `<button class="ghost-btn" type="button" data-load-more-messages>이전 기록 더 보기</button>`);
+  }
+}
+
+async function loadMoreMessages() {
+  const current = getMessages();
+  const result = await apiJson(`/api/alimtalk?limit=200&offset=${current.length}`, { silent: true });
+  if (!result?.ok || !Array.isArray(result.rows)) return showToast(result?.message || "이전 기록을 불러오지 못했습니다.");
+  messageSummary = result.summary || messageSummary;
+  messageHasMore = Boolean(result.hasMore);
+  setMessages([...current, ...result.rows]);
+  renderAll();
 }
 
 function updateMessage(messageId, updater) {
@@ -2792,7 +2815,11 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (event.target.closest("#alimtalkSyncBtn")) {
-    syncPendingMessageStatuses();
+    syncPendingMessageStatuses({ all: true });
+    return;
+  }
+  if (event.target.closest("[data-load-more-messages]")) {
+    loadMoreMessages();
     return;
   }
 

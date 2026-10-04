@@ -14,7 +14,7 @@ function makeEnv() {
     { id: "notice-2", related_id: "pending-1" },
   ];
   const deletedImages = [];
-  const message = { id: "talk-1", status: "accepted", solapi_group_id: "group-1", solapi_message_id: "message-1", sent_at: "" };
+  const message = { id: "talk-1", status: "accepted", solapi_group_id: "group-1", solapi_message_id: "message-1", created_at: "2026-10-04T00:00:00.000Z", sent_at: "" };
   const env = {
     ADMIN_API_TOKEN: "test-token",
     SOLAPI_API_KEY: "test-key",
@@ -26,6 +26,9 @@ function makeEnv() {
         return {
           bind(...values) { params = values; return this; },
           async all() {
+            if (sql.includes("SELECT id, solapi_message_id, created_at, sent_at FROM alimtalk_queue")) {
+              return { results: [message] };
+            }
             if (sql.includes("SELECT id, card_image_key FROM seller_applications")) {
               return { results: applications.filter((row) => row.status === "rejected" && (!params.length || row.id === params[0])) };
             }
@@ -118,6 +121,36 @@ test("Solapi delivery result changes accepted to sent", async () => {
     assert.equal(response.status, 200);
     assert.equal(payload.row.status, "sent");
     assert.equal(payload.row.sentAt, "2026-10-04T01:00:00.000Z");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("batch reconciliation checks multiple message IDs in one Solapi request", async () => {
+  const state = makeEnv();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    calls += 1;
+    const target = new URL(url);
+    assert.equal(target.pathname, "/messages/v4/list");
+    assert.deepEqual(JSON.parse(target.searchParams.get("messageIds")), ["message-1"]);
+    return new Response(JSON.stringify({ messageList: { "message-1": { messageId: "message-1", statusCode: "4000" } } }), { status: 200 });
+  };
+  try {
+    const response = await onRequest({
+      request: new Request("https://admin.example/api/alimtalk/refresh-batch", {
+        method: "POST",
+        headers: { "X-Admin-Token": "test-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50 }),
+      }),
+      env: state.env,
+      params: { path: ["alimtalk", "refresh-batch"] },
+    });
+    const payload = await response.json();
+    assert.equal(payload.updated, 1);
+    assert.equal(calls, 1);
+    assert.equal(state.message.status, "sent");
   } finally {
     globalThis.fetch = originalFetch;
   }
