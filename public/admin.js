@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   brandPackages: "pickquoteBrandPackagesAdmin",
   brandConsultations: "pickquoteBrandConsultationsAdmin",
 };
+localStorage.removeItem(STORAGE_KEYS.customerQuotes);
 const PUBLIC_API_BASE = "https://ga-pick.com";
 
 // 마지막으로 정상 조회한 서버 데이터는 화면 표시용 스냅샷으로 유지합니다.
@@ -305,7 +306,7 @@ editCustomerQuoteModal.innerHTML = `
       <input type="hidden" name="quoteId" />
       <div class="form-grid">
         <label>고객명<input type="text" name="customer" required /></label>
-        <label>연락처<input type="text" name="phone" data-phone-edit required /></label>
+        <label>연락처 변경<input type="text" name="phone" data-phone-edit /></label>
         <label>구매 사유<select name="purchasePurpose"></select></label>
         <label>브랜드<select name="desiredBrand"></select></label>
         <label class="span-2">품목<input type="text" name="items" required /></label>
@@ -1142,6 +1143,7 @@ function normalizePhone(value) {
 }
 
 function formatPhoneNumber(value) {
+  if (String(value || "").includes("*")) return String(value);
   const digits = normalizePhone(value).slice(0, 11);
   if (digits.length <= 3) return digits;
   if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
@@ -1176,7 +1178,8 @@ function openEditCustomerQuoteModal(quoteId) {
 
   editCustomerQuoteForm.quoteId.value = quote.id;
   editCustomerQuoteForm.customer.value = quote.customer || "";
-  editCustomerQuoteForm.phone.value = formatPhoneNumber(quote.phone);
+  editCustomerQuoteForm.phone.value = "";
+  editCustomerQuoteForm.phone.placeholder = "변경할 때만 입력 (7일 이내)";
   editCustomerQuoteForm.items.value = quote.items || "";
   editCustomerQuoteForm.price.value = Number(quote.price || 0) || "";
   editCustomerQuoteForm.region.value = quote.region || "";
@@ -1810,7 +1813,7 @@ function renderCustomerQuotes() {
             <div class="quote-admin-head">
               <div>
                 <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
-                <p>${escapeHTML(quote.customer || "-")} · ${escapeHTML(formatPhoneNumber(quote.phone))}</p>
+                <p>${escapeHTML(quote.customer || "-")} · <span data-customer-phone="${escapeHTML(quote.id)}">${escapeHTML(formatPhoneNumber(quote.phone))}</span></p>
               </div>
               <span class="status ${status.className}" data-admin-quote-status data-quote-id="${escapeHTML(quote.id)}">견적 상태 · ${status.label}</span>
             </div>
@@ -1828,6 +1831,7 @@ function renderCustomerQuotes() {
             <p>${escapeHTML(quote.memo || "추가 요청 없음")}</p>
             ${renderQuoteBidSummary(quote)}
             <div class="quote-admin-actions">
+              ${Date.now() < Date.parse(quote.createdAt || "") + 7 * 86400000 ? `<button class="plain-btn small-btn" type="button" data-reveal-customer-phone="${escapeHTML(quote.id)}">번호 열람</button>` : ""}
               <button class="plain-btn small-btn" type="button" data-replace-customer-quote-image="${escapeHTML(quote.id)}">견적 이미지 교체</button>
               <button class="plain-btn small-btn" type="button" data-edit-customer-quote="${escapeHTML(quote.id)}">정보 수정</button>
               <button class="danger-btn small-btn" type="button" data-delete-customer-quote="${escapeHTML(quote.id)}">견적 삭제</button>
@@ -2087,8 +2091,8 @@ async function submitCustomerQuoteEdit(event) {
     region: form.region.value.trim(),
     memo: form.memo.value.trim(),
   };
-  if (!payload.customer || !normalizePhone(payload.phone) || !payload.items) {
-    showToast("고객명, 연락처, 품목은 필수입니다.");
+  if (!payload.customer || !payload.items) {
+    showToast("고객명과 품목은 필수입니다.");
     return;
   }
   const ok = await syncCustomerQuoteUpdateToServer(quoteId, payload);
@@ -2431,6 +2435,33 @@ function renderAll() {
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-admin-text-cancel]") || event.target === adminTextModal) {
     closeAdminTextModal(null);
+    return;
+  }
+
+  const revealPhoneButton = event.target.closest("[data-reveal-customer-phone]");
+  if (revealPhoneButton) {
+    void (async () => {
+      const token = await openAdminTextModal({
+        eyebrow: "개인정보 열람",
+        title: "관리자 토큰 재확인",
+        description: "등록 후 7일 이내의 고객 연락처만 열람할 수 있습니다.",
+        label: "관리자 API 토큰",
+        inputType: "password",
+        confirmText: "번호 열람",
+      });
+      if (!token) return;
+      const quoteId = revealPhoneButton.dataset.revealCustomerPhone;
+      const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}/phone`, {
+        method: "POST",
+        headers: { "X-Admin-Reauth": token.trim() },
+      });
+      if (!result?.ok) return showToast(result?.message || "번호를 열람하지 못했습니다.");
+      const element = document.querySelector(`[data-customer-phone="${CSS.escape(quoteId)}"]`);
+      if (element) {
+        element.textContent = formatPhoneNumber(result.phone);
+        window.setTimeout(() => { if (element.isConnected) element.textContent = "***-****-****"; }, 60000);
+      }
+    })();
     return;
   }
 

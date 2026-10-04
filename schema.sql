@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS customer_quotes (
   quote_number TEXT NOT NULL UNIQUE,
   customer TEXT NOT NULL,
   phone TEXT NOT NULL,
+  phone_hash TEXT DEFAULT '',
+  phone_ciphertext TEXT DEFAULT '',
   items TEXT NOT NULL,
   purchase_purpose TEXT DEFAULT '',
   desired_brand TEXT DEFAULT '',

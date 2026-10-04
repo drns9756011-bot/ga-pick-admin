@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   brandPackages: "pickquoteBrandPackagesAdmin",
   brandConsultations: "pickquoteBrandConsultationsAdmin",
 };
+localStorage.removeItem(STORAGE_KEYS.customerQuotes);
 const PUBLIC_API_BASE = "https://ga-pick.com";
 localStorage.removeItem("pickquoteDeletedQuoteLogs");
 
@@ -1265,6 +1266,7 @@ function normalizePhone(value) {
 }
 
 function formatPhoneNumber(value) {
+  if (String(value || "").includes("*")) return "***-****-****";
   const digits = normalizePhone(value).slice(0, 11);
   if (digits.length <= 3) return digits;
   if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
@@ -1299,7 +1301,8 @@ function openEditCustomerQuoteModal(quoteId) {
 
   editCustomerQuoteForm.quoteId.value = quote.id;
   editCustomerQuoteForm.customer.value = quote.customer || "";
-  editCustomerQuoteForm.phone.value = formatPhoneNumber(quote.phone);
+  editCustomerQuoteForm.phone.value = "";
+  editCustomerQuoteForm.phone.placeholder = "번호 변경 시에만 입력";
   editCustomerQuoteForm.items.value = quote.items || "";
   editCustomerQuoteForm.price.value = Number(quote.price || 0) || "";
   editCustomerQuoteForm.region.value = quote.region || "";
@@ -1708,6 +1711,27 @@ function renderApplicationDetail(application) {
   `;
 }
 
+const adminQuoteImageCache = new Map();
+async function loadAdminQuoteImage(image) {
+  const source = image.dataset.fileSrc || "";
+  if (!source || !source.startsWith("/api/files/")) return;
+  const token = readAdminApiToken();
+  if (!token) return;
+  if (!adminQuoteImageCache.has(source)) {
+    adminQuoteImageCache.set(source, fetch(source, {
+      headers: { "X-Admin-Token": token }, cache: "no-store",
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("이미지 열람 실패");
+      return URL.createObjectURL(await response.blob());
+    }).catch((error) => {
+      adminQuoteImageCache.delete(source);
+      throw error;
+    }));
+  }
+  try { image.src = await adminQuoteImageCache.get(source); }
+  catch { image.closest(".quote-admin-thumb")?.replaceChildren("이미지를 불러오지 못했습니다."); }
+}
+
 async function deleteRejectedApplication(applicationId) {
   const row = getApplications().find((application) => application.id === applicationId && application.status === "rejected");
   if (!row || !window.confirm(`${sellerName(row) || row.sellerId} 반려 내역을 서버에서 완전히 삭제할까요?\n관련 알림 기록과 명함 이미지도 삭제되며 복구할 수 없습니다.`)) return;
@@ -2106,7 +2130,7 @@ function renderCustomerQuotes() {
         <details class="ops-quote-record" data-quote-record="${escapeHTML(quote.id)}" ${openRecords.has(String(quote.id)) ? "open" : ""}>
           <summary class="ops-quote-row">
             <span><b>${escapeHTML(quote.quoteNumber || "-")}</b><small>${escapeHTML(formatDate(quote.createdAt))}</small></span>
-            <span><b>${escapeHTML(quote.customer || "-")}</b><small>${escapeHTML(formatPhoneNumber(quote.phone))}</small></span>
+            <span><b>${escapeHTML(quote.customer || "-")}</b><small data-customer-phone="${escapeHTML(quote.id)}">***-****-****</small></span>
             <span><b>${escapeHTML(quote.items || "품목 미입력")}</b><small>${escapeHTML(quote.desiredBrand || "미입력")}</small></span>
             <span>${escapeHTML(quote.region || "미입력")}</span>
             <span>${Number(quote.bidCount || quote.bidsCount || 0)}건</span>
@@ -2114,13 +2138,14 @@ function renderCustomerQuotes() {
           </summary>
         <article class="quote-admin-card">
           <div class="quote-admin-thumb">
-            ${quote.image || quote.thumbnailImage ? `<img src="${escapeHTML(quote.image || quote.thumbnailImage)}" alt="대표 견적 이미지" data-admin-quote-image data-fallback-src="${escapeHTML(quote.thumbnailImage || "")}" />` : `<span>이미지 없음</span>`}
+            ${quote.image || quote.thumbnailImage ? `<img ${String(quote.image || quote.thumbnailImage).startsWith("/api/files/") ? `data-file-src="${escapeHTML(quote.image || quote.thumbnailImage)}"` : `src="${escapeHTML(quote.image || quote.thumbnailImage)}"`} alt="대표 견적 이미지" data-admin-quote-image data-fallback-src="${escapeHTML(quote.thumbnailImage || "")}" />` : `<span>이미지 없음</span>`}
           </div>
           <div class="quote-admin-body">
             <div class="quote-admin-head">
               <div>
                 <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
-                <p>${escapeHTML(quote.customer || "-")} · ${escapeHTML(formatPhoneNumber(quote.phone))}</p>
+                <p>${escapeHTML(quote.customer || "-")} · ***-****-****</p>
+                ${Date.now() < Date.parse(quote.createdAt || "") + 7 * 86400000 ? `<button class="plain-btn small-btn" type="button" data-reveal-customer-phone="${escapeHTML(quote.id)}">번호 열람</button>` : ""}
               </div>
               <span class="status ${status.className}" data-admin-quote-status data-quote-id="${escapeHTML(quote.id)}">견적 상태 · ${status.label}</span>
             </div>
@@ -2161,7 +2186,14 @@ function renderCustomerQuotes() {
         </div>
       `;
   renderDeletedQuoteLogs();
+  customerQuoteList.querySelectorAll(".ops-quote-record[open] img[data-file-src]").forEach((image) => { void loadAdminQuoteImage(image); });
 }
+
+customerQuoteList.addEventListener("toggle", (event) => {
+  if (!event.target.matches(".ops-quote-record") || !event.target.open) return;
+  const image = event.target.querySelector("img[data-file-src]");
+  if (image) void loadAdminQuoteImage(image);
+}, true);
 
 function renderLplanSyncPanel() {
   if (!lplanSyncSummary || !lplanSyncList) return;
@@ -2385,8 +2417,8 @@ async function submitCustomerQuoteEdit(event) {
     region: form.region.value.trim(),
     memo: form.memo.value.trim(),
   };
-  if (!payload.customer || !normalizePhone(payload.phone) || !payload.items) {
-    showToast("고객명, 연락처, 품목은 필수입니다.");
+  if (!payload.customer || !payload.items) {
+    showToast("고객명과 품목은 필수입니다.");
     return;
   }
   const ok = await syncCustomerQuoteUpdateToServer(quoteId, payload);
@@ -2780,6 +2812,33 @@ function renderAll() {
 document.addEventListener("click", (event) => {
   if (event.target.closest("[data-admin-text-cancel]") || event.target === adminTextModal) {
     closeAdminTextModal(null);
+    return;
+  }
+
+  const revealPhoneButton = event.target.closest("[data-reveal-customer-phone]");
+  if (revealPhoneButton) {
+    void (async () => {
+      const token = await openAdminTextModal({
+        eyebrow: "개인정보 열람",
+        title: "관리자 토큰 재확인",
+        description: "등록 후 7일 이내의 고객 연락처만 열람할 수 있습니다.",
+        label: "관리자 API 토큰",
+        inputType: "password",
+        confirmText: "번호 열람",
+      });
+      if (!token) return;
+      const quoteId = revealPhoneButton.dataset.revealCustomerPhone;
+      const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}/phone`, {
+        method: "POST",
+        headers: { "X-Admin-Reauth": token.trim() },
+      });
+      if (!result?.ok) return showToast(result?.message || "번호를 열람하지 못했습니다.");
+      const element = document.querySelector(`[data-customer-phone="${CSS.escape(quoteId)}"]`);
+      if (element) {
+        element.textContent = formatPhoneNumber(result.phone);
+        window.setTimeout(() => { if (element.isConnected) element.textContent = "***-****-****"; }, 60000);
+      }
+    })();
     return;
   }
 

@@ -2,10 +2,12 @@
   "Content-Type": "application/json; charset=utf-8",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
+  "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token, X-Admin-Reauth",
+  "Cache-Control": "no-store",
 };
 
 import builtInSubscriptionImageMap from "../data/subscription-image-map.js";
+import { protectCustomerPhone, readCustomerPhone, customerPhoneWithinSevenDays, fullyMaskCustomerPhone } from "../phone-vault.js";
 
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
@@ -440,18 +442,22 @@ function normalizeApprovedSeller(row) {
 
 function normalizeMessage(row) {
   if (!row) return null;
+  const variables = parseJson(row.variables_json, {});
+  for (const key of Object.keys(variables)) {
+    if (/고객.*(연락처|전화|휴대폰)/.test(key)) variables[key] = fullyMaskCustomerPhone(variables[key]);
+  }
   return {
     id: row.id,
     status: row.status,
     type: row.type,
     targetRole: row.target_role || "",
     targetName: row.target_name || "",
-    targetPhone: row.target_phone || "",
+    targetPhone: row.target_role === "customer" ? fullyMaskCustomerPhone(row.target_phone) : (row.target_phone || ""),
     title: row.title,
     body: row.body,
     relatedId: row.related_id || "",
     templateId: row.template_id || "",
-    variables: parseJson(row.variables_json, {}),
+    variables,
     solapiGroupId: row.solapi_group_id || "",
     solapiMessageId: row.solapi_message_id || "",
     errorMessage: row.error_message || "",
@@ -480,7 +486,7 @@ function normalizeCustomerQuote(row, images = []) {
     id: row.id,
     quoteNumber: row.quote_number,
     customer: row.customer,
-    phone: row.phone,
+    phone: fullyMaskCustomerPhone(row.phone_ciphertext || row.phone_hash || row.phone),
     items: row.items,
     quoteType: row.quote_type || row.quoteType || "",
     purchasePurpose: row.purchase_purpose || "",
@@ -1053,6 +1059,8 @@ async function purgeDeletedQuoteLogStorage(env) {
 
 async function ensureCustomerQuoteColumns(env) {
   const statements = [
+    "ALTER TABLE customer_quotes ADD COLUMN phone_hash TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN phone_ciphertext TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image_key TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN quote_expires_at TEXT DEFAULT ''",
@@ -1117,7 +1125,8 @@ async function getCustomerQuotes(env) {
   await ensureCustomerQuoteColumns(env);
   const now = new Date().toISOString();
   const [result, summaryRow] = await Promise.all([
-    env.DB.prepare("SELECT * FROM customer_quotes ORDER BY created_at DESC LIMIT 100").all(),
+    env.DB.prepare("SELECT * FROM customer_quotes WHERE created_at >= ? ORDER BY created_at DESC LIMIT 100")
+      .bind(new Date(Date.now() - 30 * 86400000).toISOString()).all(),
     env.DB.prepare(`
       SELECT
         COUNT(*) AS total,
@@ -1126,8 +1135,8 @@ async function getCustomerQuotes(env) {
                    AND (status = 'closed' OR (COALESCE(quote_expires_at, '') <> '' AND quote_expires_at <= ?)) THEN 1 ELSE 0 END) AS unselected,
         SUM(CASE WHEN TRIM(COALESCE(selected_bid_id, '')) = '' AND status <> 'selected'
                    AND status <> 'closed' AND (COALESCE(quote_expires_at, '') = '' OR quote_expires_at > ?) THEN 1 ELSE 0 END) AS active
-      FROM customer_quotes
-    `).bind(now, now).first(),
+      FROM customer_quotes WHERE created_at >= ?
+    `).bind(now, now, new Date(Date.now() - 30 * 86400000).toISOString()).first(),
   ]);
   const summary = {
     total: Number(summaryRow?.total || 0),
@@ -1165,6 +1174,28 @@ async function getCustomerQuotes(env) {
   });
 
   return json({ ok: true, rows, summary });
+}
+
+async function revealCustomerPhone(env, request, quoteId) {
+  const reauth = String(request.headers.get("X-Admin-Reauth") || "").trim();
+  if (!reauth || reauth !== getAdminToken(env)) {
+    return json({ ok: false, message: "관리자 토큰을 다시 확인해주세요." }, 403);
+  }
+  await ensureCustomerQuoteColumns(env);
+  const quote = await env.DB.prepare("SELECT id, phone, phone_hash, phone_ciphertext, created_at FROM customer_quotes WHERE id = ? LIMIT 1")
+    .bind(quoteId).first();
+  if (!quote) return json({ ok: false, message: "고객 견적을 찾을 수 없습니다." }, 404);
+  if (!customerPhoneWithinSevenDays(quote)) {
+    return json({ ok: false, message: "7일의 열람 기간이 지났습니다." }, 410);
+  }
+  const phone = await readCustomerPhone(env, quote);
+  if (!phone) return json({ ok: false, message: "열람 가능한 연락처가 없습니다." }, 404);
+  await ensureQuoteAuditAccessLogTable(env);
+  await env.DB.prepare(`INSERT INTO quote_audit_access_logs
+    (id, quote_id, reason, admin_token_hash, requester_ip_masked, requester_ip_hash, viewed_at)
+    VALUES (?, ?, ?, ?, '', '', ?)`)
+    .bind(createId("phone-view"), quoteId, "customer_phone_reveal", await sha256Hex(reauth), new Date().toISOString()).run();
+  return json({ ok: true, phone });
 }
 
 async function ensureQuoteAuditAccessLogTable(env) {
@@ -1399,14 +1430,19 @@ async function updateCustomerQuote(env, request, id) {
   const nextCustomer = String(body.customer || "").trim();
   const nextPhone = normalizePhone(body.phone || "");
   const nextItems = String(body.items || "").trim();
-  if (!nextCustomer || !nextPhone || !nextItems) {
-    return json({ ok: false, message: "고객명, 연락처, 품목은 필수입니다." }, 400);
+  if (!nextCustomer || !nextItems) {
+    return json({ ok: false, message: "고객명과 품목은 필수입니다." }, 400);
   }
+  if (nextPhone && !customerPhoneWithinSevenDays(existing)) {
+    return json({ ok: false, message: "7일이 지나 연락처를 수정할 수 없습니다." }, 410);
+  }
+  const protectedPhone = nextPhone || existing.phone
+    ? await protectCustomerPhone(env, nextPhone || existing.phone) : null;
 
   await env.DB.prepare(
     `UPDATE customer_quotes
      SET customer = ?,
-         phone = ?,
+         phone = ?, phone_hash = ?, phone_ciphertext = ?,
          items = ?,
          purchase_purpose = ?,
          desired_brand = ?,
@@ -1417,7 +1453,9 @@ async function updateCustomerQuote(env, request, id) {
   )
     .bind(
       nextCustomer,
-      nextPhone,
+      "",
+      protectedPhone?.hash || existing.phone_hash || "",
+      customerPhoneWithinSevenDays(existing) ? (protectedPhone?.ciphertext || existing.phone_ciphertext || "") : "",
       nextItems,
       String(body.purchasePurpose || "").trim(),
       normalizeQuoteBrand(body.desiredBrand || body.desired_brand || body.brand || ""),
@@ -2063,12 +2101,12 @@ export async function onRequest(context) {
   const method = request.method;
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: jsonHeaders });
-  if (path.startsWith("files/") && method === "GET") {
-    return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
-  }
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
   const denied = requireAdmin(request, env);
   if (denied) return denied;
+  if (path.startsWith("files/") && method === "GET") {
+    return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
+  }
 
   if (path === "auth-status" && method === "GET") {
     return json({ ok: true, tokenSource: "Cloudflare Secret" });
@@ -2096,6 +2134,9 @@ export async function onRequest(context) {
 
   if (path === "approved-sellers" && method === "GET") return getApprovedSellers(env);
   if (path === "customer-quotes" && method === "GET") return getCustomerQuotes(env);
+  if (path.startsWith("customer-quotes/") && path.endsWith("/phone") && method === "POST") {
+    return revealCustomerPhone(env, request, decodeURIComponent(pathParts.slice(1, -1).join("/")));
+  }
   if (path.startsWith("customer-quotes/") && path.endsWith("/submission-audit") && method === "POST") {
     return revealQuoteSubmissionAudit(env, request, decodeURIComponent(pathParts.slice(1, -1).join("/")));
   }
