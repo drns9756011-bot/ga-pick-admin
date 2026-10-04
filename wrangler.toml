@@ -15,7 +15,7 @@ SOLAPI_TEMPLATE_SELLER_APPROVED = "KA01TP260725101616235ziVJkZImZ9O"
 SOLAPI_TEMPLATE_SELLER_REJECTED = "KA01TP260725102900428RYxfTGV9SoG"
 
 [assets]
-directory = "."
+directory = "./deploy-assets"
 binding = "ASSETS"
 
 [[d1_databases]]
