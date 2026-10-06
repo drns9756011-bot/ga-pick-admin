@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import { onRequest } from "../functions/api/[[path]].js";
 
-const source = readFileSync(new URL("../public/admin.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../admin.js", import.meta.url), "utf8");
 const start = source.indexOf("let applicationCardObjectUrl =");
 const end = source.indexOf("function renderApplicationDetail(", start);
 const requests = [];
