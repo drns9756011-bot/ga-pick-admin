@@ -1457,7 +1457,70 @@ function renderApplications() {
   renderApplicationDetail(selected);
 }
 
+let applicationCardObjectUrl = "";
+let applicationCardLoadId = 0;
+
+function sellerCardObjectKey(application) {
+  const storedKey = String(application?.cardImageKey || "").trim();
+  if (/^seller-cards\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(storedKey)) return storedKey;
+  try {
+    const url = new URL(String(application?.cardImage || ""), window.location.origin);
+    if (!url.pathname.startsWith("/api/files/seller-cards/")) return "";
+    const key = decodeURIComponent(url.pathname.slice("/api/files/".length));
+    return /^seller-cards\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(key) ? key : "";
+  } catch {
+    return "";
+  }
+}
+
+function setApplicationCardMessage(preview, message) {
+  const placeholder = document.createElement("span");
+  placeholder.textContent = message;
+  preview.replaceChildren(placeholder);
+}
+
+async function loadApplicationCard(application, preview, loadId) {
+  const source = String(application.cardImage || "");
+  if (/^data:image\/(?:jpeg|jpg|png|webp|gif|avif);base64,[A-Za-z0-9+/=]+$/.test(source)) {
+    const image = document.createElement("img");
+    image.src = source;
+    image.alt = `${sellerName(application)} 명함 이미지`;
+    preview.replaceChildren(image);
+    return;
+  }
+  const key = sellerCardObjectKey(application);
+  if (!key) {
+    setApplicationCardMessage(preview, source ? "명함 이미지 주소를 확인할 수 없습니다." : "등록된 명함 이미지가 없습니다.");
+    return;
+  }
+  const token = readAdminApiToken();
+  if (!token) {
+    setApplicationCardMessage(preview, "관리자 인증 후 명함을 확인할 수 있습니다.");
+    return;
+  }
+  try {
+    const path = `/api/files/${key.split("/").map(encodeURIComponent).join("/")}`;
+    const response = await fetch(path, { cache: "no-store", headers: { "X-Admin-Token": token } });
+    if (!response.ok) throw new Error(response.status === 404
+      ? "명함 이미지 파일을 찾을 수 없습니다."
+      : response.status === 401 ? "관리자 인증 토큰을 다시 확인해주세요." : "명함 이미지를 불러오지 못했습니다.");
+    const blob = await response.blob();
+    if (!/^image\/(?:jpeg|jpg|png|webp|gif|avif)$/.test(blob.type)) throw new Error("지원하지 않는 명함 이미지 형식입니다.");
+    if (loadId !== applicationCardLoadId || !preview.isConnected) return;
+    applicationCardObjectUrl = URL.createObjectURL(blob);
+    const image = document.createElement("img");
+    image.src = applicationCardObjectUrl;
+    image.alt = `${sellerName(application)} 명함 이미지`;
+    preview.replaceChildren(image);
+  } catch (error) {
+    if (loadId === applicationCardLoadId && preview.isConnected) setApplicationCardMessage(preview, error.message || "명함 이미지를 불러오지 못했습니다.");
+  }
+}
+
 function renderApplicationDetail(application) {
+  applicationCardLoadId += 1;
+  if (applicationCardObjectUrl) URL.revokeObjectURL(applicationCardObjectUrl);
+  applicationCardObjectUrl = "";
   if (!application) {
     applicationDetail.innerHTML = `
       <div class="empty-state">
@@ -1477,9 +1540,7 @@ function renderApplicationDetail(application) {
         <p class="meta-line">${escapeHTML(managerName(application))} · ${escapeHTML(formatPhoneNumber(application.phone))}</p>
       </div>
     </div>
-    <div class="card-preview">
-      ${application.cardImage ? `<img src="${application.cardImage}" alt="${escapeHTML(sellerName(application))} 명함 이미지" />` : "<span>등록된 명함 이미지가 없습니다.</span>"}
-    </div>
+    <div class="card-preview"><span>명함 이미지를 불러오는 중입니다.</span></div>
     <dl class="detail-grid">
       <div><dt>판매자 아이디</dt><dd>${escapeHTML(application.sellerId)}</dd></div>
       <div><dt>채널</dt><dd>${escapeHTML(application.channel || "미입력")}</dd></div>
@@ -1504,6 +1565,7 @@ function renderApplicationDetail(application) {
       </div>
     </div>
   `;
+  void loadApplicationCard(application, applicationDetail.querySelector(".card-preview"), applicationCardLoadId);
 }
 
 async function approveApplication(applicationId) {
