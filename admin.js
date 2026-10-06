@@ -429,6 +429,7 @@ const adminTextModalForm = document.querySelector("#adminTextModalForm");
 const adminTextModalTitle = document.querySelector("#adminTextModalTitle");
 const adminTextModalEyebrow = document.querySelector("#adminTextModalEyebrow");
 const adminTextModalDescription = document.querySelector("#adminTextModalDescription");
+const adminTextModalLabel = document.querySelector("#adminTextModalLabel");
 const adminTextModalLabelText = document.querySelector("#adminTextModalLabel span");
 const adminTextModalInput = document.querySelector("#adminTextModalInput");
 const adminTextModalTextarea = document.querySelector("#adminTextModalTextarea");
@@ -464,6 +465,7 @@ function openAdminTextModal(options = {}) {
     inputType = "text",
     confirmText = "확인",
     danger = false,
+    confirmOnly = false,
   } = options;
 
   return new Promise((resolve) => {
@@ -473,6 +475,7 @@ function openAdminTextModal(options = {}) {
     adminTextModalDescription.textContent = description;
     adminTextModalDescription.hidden = !description;
     adminTextModalLabelText.textContent = label;
+    adminTextModalLabel.hidden = confirmOnly;
     adminTextModalConfirm.textContent = confirmText;
     adminTextModalConfirm.classList.toggle("danger-action", Boolean(danger));
     adminTextModalInput.hidden = multiline;
@@ -481,7 +484,7 @@ function openAdminTextModal(options = {}) {
     adminTextModalInput.value = value;
     adminTextModalTextarea.value = value;
     adminTextModal.hidden = false;
-    setTimeout(() => (multiline ? adminTextModalTextarea : adminTextModalInput).focus(), 0);
+    setTimeout(() => (confirmOnly ? adminTextModalConfirm : multiline ? adminTextModalTextarea : adminTextModalInput).focus(), 0);
   });
 }
 
@@ -2882,14 +2885,15 @@ document.addEventListener("click", (event) => {
   const revealPhoneButton = event.target.closest("[data-reveal-customer-phone]");
   if (revealPhoneButton) {
     void (async () => {
-      const token = await openAdminTextModal({
+      const confirmed = await openAdminTextModal({
         eyebrow: "개인정보 열람",
-        title: "관리자 토큰 재확인",
-        description: "등록 후 7일 이내의 고객 연락처만 열람할 수 있습니다.",
-        label: "관리자 API 토큰",
-        inputType: "password",
+        title: "고객 번호를 열람할까요?",
+        description: "등록 후 7일 이내에만 열람할 수 있으며, 열람 기록이 저장됩니다.",
         confirmText: "번호 열람",
+        confirmOnly: true,
       });
+      if (!confirmed) return;
+      const token = await requestAdminApiToken();
       if (!token) return;
       const quoteId = revealPhoneButton.dataset.revealCustomerPhone;
       const result = await apiJson(`/api/customer-quotes/${encodeURIComponent(quoteId)}/phone`, {
@@ -3102,7 +3106,7 @@ document.addEventListener("change", async (event) => {
 editApprovedSellerForm?.addEventListener("submit", submitApprovedSellerEdit);
 adminTextModalForm?.addEventListener("submit", (event) => {
   event.preventDefault();
-  const value = adminTextModalTextarea.hidden ? adminTextModalInput.value : adminTextModalTextarea.value;
+  const value = adminTextModalLabel.hidden ? true : adminTextModalTextarea.hidden ? adminTextModalInput.value : adminTextModalTextarea.value;
   closeAdminTextModal(value);
 });
 
