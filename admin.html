@@ -5,12 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>픽견적 관리자</title>
     <meta name="description" content="픽견적 판매자 신청, 고객 견적, 알림톡 발송 상태를 관리하는 운영 페이지입니다." />
-    <link rel="stylesheet" href="/admin.css?v=20260819-phone-verification-v1" />
-<script defer src="/admin.js?v=20261006-phone-confirm" charset="utf-8"></script>
-  <link rel="stylesheet" href="/admin-workspace.css?v=20260930-ops" />
-<script defer src="/admin-workspace.js?v=20260930-ops"></script>
+    <link rel="stylesheet" href="/admin.css?v=20260823-operations-console-v1" />
+<script defer src="/admin.js?v=20261007-workbench" charset="utf-8"></script>
+    <link rel="preload" href="/assets/suit-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/admin-workspace.css?v=20261007-workbench" />
+    <script defer src="/vendor/admin-icon-nodes.js?v=20261007-workbench"></script>
+    <script defer src="/admin-workspace.js?v=20261007-workbench"></script>
 </head>
   <body class="ops-console">
+    <a class="ops-skip-link" href="#adminShell">본문으로 이동</a>
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="픽견적 관리자 홈">
         <span class="brand-mark">P</span>
@@ -19,74 +22,44 @@
           <small>관리자 콘솔</small>
         </span>
       </a>
-      <nav class="side-nav" aria-label="관리자 메뉴">
-        <span class="nav-label">운영 메뉴</span>
-        <a href="/" data-admin-nav="dashboard">관리 현황</a>
+            <nav class="side-nav" aria-label="관리자 메뉴">
+        <span class="nav-label">견적 운영</span>
+        <a href="/" data-admin-nav="dashboard" class="is-active" aria-current="page">운영 대시보드</a>
         <a href="/customers" data-admin-nav="customers">고객 견적</a>
+        <span class="nav-label">판매자 운영</span>
         <a href="/sellers" data-admin-nav="sellers">판매자 신청</a>
         <a href="/approved-sellers" data-admin-nav="approvedSellers">승인 판매자</a>
+        <a href="/seller-access" data-admin-nav="sellerAccess">판매자 접속 기록</a>
+        <span class="nav-label">서비스 운영</span>
+        <a href="/brand-hall" data-admin-nav="brandHall">브랜드관 관리</a>
+        <a href="/subscription-products">구독 상품 업로드</a>
         <a href="/alimtalk" data-admin-nav="alimtalk">알림톡 상태</a>
-        <a href="/subscription-products" data-admin-nav="subscriptionProducts">구독 상품 업로드</a>
+        <span class="nav-label">보안 및 상담</span>
         <a href="/anonymous-consultation" data-admin-nav="anonymousConsultation">익명상담 판정</a>
+        <a href="/anonymous-chat">채팅 관리</a>
       </nav>
       <a class="home-link" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면으로</a>
     </aside>
 
-    <main class="admin-shell" id="dashboard">
+    <main class="admin-shell" id="adminShell" tabindex="-1">
       <header class="admin-header">
         <div>
-          <h1>운영 현황을 한눈에 확인하세요.</h1>
+          <h1>운영 대시보드</h1>
         </div>
         <div class="admin-actions">
-          <a class="ghost-btn" href="https://ga-pick.com/" target="_blank" rel="noopener">서비스 화면</a>
+          <button class="ghost-btn" id="adminAuthBtn" type="button">관리자 인증</button>
           <button class="primary-btn" id="refreshBtn" type="button">새로고침</button>
         </div>
       </header>
 
       <section class="stat-grid" id="statGrid" aria-label="관리 현황"></section>
 
-      <section class="dashboard-home" id="dashboardHome" aria-label="관리자 대시보드 바로가기">
-        <div class="dashboard-home-head">
-          <div>
-            <p class="eyebrow">Operations</p>
-            <h2>필요한 업무를 선택해 빠르게 확인하세요.</h2>
-          </div>
-          <p>고객 견적, 판매자 신청, 승인 계정, 알림톡 상태를 각각 분리해서 관리합니다.</p>
-        </div>
-        <div class="dashboard-link-grid">
-          <a class="dashboard-link-card" href="/customers">
-            <span>01</span>
-            <strong>고객 견적</strong>
-            <p>등록된 견적과 선택 상태를 확인하고 필요한 정보를 관리합니다.</p>
-          </a>
-          <a class="dashboard-link-card" href="/sellers">
-            <span>02</span>
-            <strong>판매자 신청</strong>
-            <p>신규 등록 요청을 검토하고 승인 또는 반려합니다.</p>
-          </a>
-          <a class="dashboard-link-card" href="/approved-sellers">
-            <span>03</span>
-            <strong>승인 판매자</strong>
-            <p>판매자 계정, 지점, 매니저 정보를 관리합니다.</p>
-          </a>
-          <a class="dashboard-link-card" href="/anonymous-consultation">
-            <span>05</span>
-            <strong>익명상담 판정</strong>
-            <p>차단된 상담 메시지와 개인정보 노출 사례를 검토하고 판정합니다.</p>
-          </a>
-          <a class="dashboard-link-card" href="/alimtalk">
-            <span>04</span>
-            <strong>알림톡 상태</strong>
-            <p>발송 결과와 실패 이력을 확인하고 재발송합니다.</p>
-          </a>
-        </div>
-      </section>
+      <section class="dashboard-home" id="dashboardHome" aria-label="운영 업무 현황"></section>
 
       <section class="workspace" id="sellerReview">
         <section class="panel queue-panel" id="applications">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Seller Review</p>
               <h2>판매자 등록 신청</h2>
             </div>
             <div class="segmented" aria-label="신청 상태 필터">
@@ -103,16 +76,56 @@
           <div class="application-list" id="applicationList"></div>
         </section>
 
-        <aside class="panel detail-panel" id="applicationDetail"></aside>
+        <aside class="panel detail-panel" id="applicationDetail" aria-label="판매자 신청 상세"></aside>
       </section>
 
+
+
+      <section class="panel seller-access-panel" id="sellerAccessPanel" hidden>
+        <div class="panel-head seller-access-head">
+          <div>
+            <h2>판매자 접속 기록</h2>
+            <p class="panel-note">성공한 판매자 로그인을 기록합니다. IP는 원문이 아닌 마스킹된 값만 표시합니다.</p>
+          </div>
+          <div class="seller-access-tools">
+            <label>조회 기간
+              <select id="sellerAccessDays">
+                <option value="7">최근 7일</option>
+                <option value="30" selected>최근 30일</option>
+                <option value="90">최근 90일</option>
+                <option value="365">최근 1년</option>
+              </select>
+            </label>
+            <label>기록 검색
+              <input id="sellerAccessSearch" type="search" placeholder="아이디, 지점, 매니저, 채널 검색" />
+            </label>
+          </div>
+        </div>
+        <div class="seller-access-summary" id="sellerAccessSummary"></div>
+        <div class="seller-access-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>접속 일시</th>
+                <th>채널</th>
+                <th>지점</th>
+                <th>매니저</th>
+                <th>아이디</th>
+                <th>기기·브라우저</th>
+                <th>접속 IP</th>
+              </tr>
+            </thead>
+            <tbody id="sellerAccessRows"></tbody>
+          </table>
+        </div>
+      </section>
       <section class="grid-two" id="adminSecondaryGrid">
         <section class="panel" id="approvedSellers">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Approved Sellers</p>
               <h2>승인 판매자</h2>
             </div>
+            <input id="approvedSellerSearch" type="search" aria-label="승인 판매자 검색" placeholder="지점, 매니저, 아이디 검색" />
           </div>
           <div class="seller-table-wrap">
             <table>
@@ -122,6 +135,7 @@
                   <th>매니저</th>
                   <th>담당 지역</th>
                   <th>아이디</th>
+                  <th>견적 알림톡</th>
                   <th>관리</th>
                 </tr>
               </thead>
@@ -133,7 +147,6 @@
         <section class="panel" id="alimtalkControl">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Alimtalk</p>
               <h2>알림톡 발송 상태</h2>
             </div>
             <div class="segmented" aria-label="알림톡 상태 필터">
@@ -146,7 +159,75 @@
           <div class="message-list" id="messageList"></div>
         </section>
       </section>
+      <section class="panel brand-hall-admin-panel" id="brandHallPanel" hidden>
+        <div class="panel-head brand-admin-head">
+          <div>
+            <h2>브랜드관 직접 운영</h2>
+            <p class="panel-note">공개 화면에는 채널만 노출하고, 지점·매니저 정보는 관리자에게만 표시합니다. 고객 상담도 픽견적이 먼저 진행합니다.</p>
+          </div>
+          <a class="ghost-btn" href="https://ga-pick.com/brand" target="_blank" rel="noopener">브랜드관 보기</a>
+        </div>
+
+        <div class="brand-admin-grid">
+          <section class="brand-admin-editor">
+            <div class="brand-admin-subhead"><div><h3 id="brandPackageFormTitle">패키지 등록</h3></div><button class="plain-btn" id="brandPackageResetBtn" type="button">새 패키지</button></div>
+            <form id="brandPackageAdminForm" class="brand-package-admin-form" novalidate>
+              <input type="hidden" name="packageId" />
+              <label><span class="brand-field-label">연결 판매자 <span class="required-star" aria-label="필수">*</span></span>
+                <select name="sellerId" id="brandPackageSeller" required><option value="">승인 판매자를 선택하세요</option></select>
+              </label>
+              <div class="brand-selected-seller" id="brandSelectedSeller">판매자를 선택하면 내부 지점·매니저 정보가 표시됩니다.</div>
+              <div class="brand-admin-form-row">
+                <label><span class="brand-field-label">브랜드 <span class="required-star" aria-label="필수">*</span></span>
+                  <select name="brand" required><option value="">선택</option><option>LG전자</option><option>삼성전자</option><option>혼합 패키지</option></select>
+                </label>
+                <label>노출 상태
+                  <select name="status"><option value="active">공개</option><option value="hidden">숨김</option></select>
+                </label>
+              </div>
+              <label><span class="brand-field-label">패키지명 <span class="required-star" aria-label="필수">*</span></span><input name="title" maxlength="80" placeholder="예: 신혼 프리미엄 4종 패키지" required /></label>
+              <label><span class="brand-field-label">제품 구성 <span class="required-star" aria-label="필수">*</span> <span class="field-help">한 줄에 한 제품</span></span><textarea name="items" rows="6" placeholder="OLED TV 77인치\n냉장고 870L\n워시타워\n식기세척기" required></textarea></label>
+              <div class="brand-admin-form-row brand-price-row">
+                <label>
+                  <span class="brand-field-label">정상가 <span class="brand-price-label-unit">(만원)</span></span>
+                  <span class="brand-price-input-wrap"><input name="originalPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="예: 2,389" /><span class="brand-input-unit">만원</span></span>
+                  <span class="brand-price-preview" data-brand-price-preview="originalPrice">금액을 입력하면 원 단위로 표시됩니다.</span>
+                </label>
+                <label>
+                  <span class="brand-field-label">판매가 <span class="brand-price-label-unit">(만원)</span> <span class="required-star" aria-label="필수">*</span></span>
+                  <span class="brand-price-input-wrap"><input name="salePrice" type="text" inputmode="decimal" autocomplete="off" placeholder="예: 1,089" required /><span class="brand-input-unit">만원</span></span>
+                  <span class="brand-price-preview" data-brand-price-preview="salePrice">필수 · 실제 판매 금액을 입력하세요.</span>
+                </label>
+              </div>
+              <label>혜택 설명<textarea name="benefits" rows="4" maxlength="1000" placeholder="카드·포인트·설치 혜택 등"></textarea></label>
+              <label>대표 이미지<input name="coverImage" id="brandCoverImageInput" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+              <div class="brand-cover-preview" id="brandCoverPreview">대표 이미지 미리보기</div>
+              <button class="primary-btn brand-package-save" type="submit">서버에 저장</button>
+            </form>
+          </section>
+
+          <section class="brand-admin-packages">
+            <div class="brand-admin-subhead"><div><h3>등록 패키지</h3></div><span id="brandPackageAdminCount">0건</span></div>
+            <div class="brand-admin-package-list" id="brandAdminPackageList"></div>
+          </section>
+        </div>
+
+        <section class="brand-admin-consults">
+          <div class="brand-admin-subhead">
+            <div><h3>상담 · 계약 · 수수료 정산</h3></div>
+            <span id="brandConsultAdminCount">0건</span>
+          </div>
+          <div class="brand-consult-admin-table-wrap">
+            <table class="brand-consult-admin-table">
+              <thead><tr><th>접수</th><th>고객</th><th>패키지/판매처</th><th>진행</th><th>계약금액</th><th>수수료</th><th>정산</th><th>관리메모</th><th>저장</th></tr></thead>
+              <tbody id="brandConsultAdminRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
     </main>
+
 
     <div class="admin-loading-modal" id="adminLoadingModal" role="status" aria-live="polite" hidden>
       <div class="admin-loading-box">

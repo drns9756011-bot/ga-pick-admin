@@ -24,9 +24,9 @@ if (!document.querySelector('.side-nav a[href="/subscription-products"]')) {
   document.querySelector('.side-nav a[href="/anonymous-chat"]')?.insertAdjacentElement("beforebegin", adminSubscriptionLink);
 }
 
-// 마지막으로 정상 조회한 서버 데이터는 화면 표시용 스냅샷으로 유지합니다.
-// 메뉴 이동이나 페이지 재실행만으로 서버를 다시 조회하지 않으며,
-// 사용자가 상단 새로고침을 눌렀을 때만 새 데이터로 교체합니다.
+// Keep the last snapshot visible while a route's data is refreshed once per visit.
+const loadedAdminScopes = new Set();
+const adminScopeRequests = new Map();
 
 
 let applicationFilter = "pending";
@@ -117,7 +117,7 @@ const ADMIN_PAGE_CONFIG = {
     title: "운영 대시보드",
     heading: "운영 대시보드",
     copy: "견적, 판매자, 상담, 알림 업무의 현재 상태를 확인하고 필요한 처리 화면으로 이동합니다.",
-    visible: ["statGrid", "lplanSyncPanel", "dashboardHome"],
+    visible: ["statGrid", "dashboardHome"],
   },
   customers: {
     path: "/customers",
@@ -230,7 +230,26 @@ function navigateAdminPage(pageKey, options = {}) {
   }
   renderAll();
   if (pageKey === "alimtalk") void refreshAlimtalkPage();
+  else void ensureAdminScope(pageKey);
   if (!options.keepScroll) window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+async function ensureAdminScope(pageKey = getCurrentAdminPageKey()) {
+  if (!readAdminApiToken() || loadedAdminScopes.has(pageKey)) return;
+  if (adminScopeRequests.has(pageKey)) return adminScopeRequests.get(pageKey);
+  const request = loadAdminDataFromServer({ silent: true, pageKey });
+  adminScopeRequests.set(pageKey, request);
+  if (pageKey === getCurrentAdminPageKey()) {
+    refreshBtn.disabled = true;
+    adminLastUpdated.textContent = '조회 중';
+  }
+  try {
+    await request;
+  } finally {
+    adminScopeRequests.delete(pageKey);
+    refreshBtn.disabled = adminScopeRequests.has(getCurrentAdminPageKey());
+    if (!refreshBtn.disabled) updateLastRefreshedDisplay();
+  }
 }
 
 function applyAdminPageView() {
@@ -334,7 +353,6 @@ editCustomerQuoteModal.innerHTML = `
   <div class="admin-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="editCustomerQuoteTitle">
     <div class="admin-modal-head">
       <div>
-        <p class="eyebrow">Customer Quote</p>
         <h2 id="editCustomerQuoteTitle">고객 견적 정보 수정</h2>
       </div>
       <button class="modal-close-btn" type="button" data-close-admin-modal aria-label="닫기">×</button>
@@ -368,7 +386,6 @@ editApprovedSellerModal.innerHTML = `
   <div class="admin-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="editApprovedSellerTitle">
     <div class="admin-modal-head">
       <div>
-        <p class="eyebrow">Approved Seller</p>
         <h2 id="editApprovedSellerTitle">승인 판매자 정보 수정</h2>
       </div>
       <button class="modal-close-btn" type="button" data-close-admin-modal aria-label="닫기">×</button>
@@ -404,7 +421,6 @@ adminTextModal.innerHTML = `
   <div class="admin-modal-dialog admin-text-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTextModalTitle">
     <div class="admin-modal-head">
       <div>
-        <p class="eyebrow" id="adminTextModalEyebrow">Admin Confirm</p>
         <h2 id="adminTextModalTitle">입력 확인</h2>
       </div>
       <button class="modal-close-btn" type="button" data-admin-text-cancel aria-label="닫기">×</button>
@@ -427,7 +443,6 @@ document.body.appendChild(adminTextModal);
 
 const adminTextModalForm = document.querySelector("#adminTextModalForm");
 const adminTextModalTitle = document.querySelector("#adminTextModalTitle");
-const adminTextModalEyebrow = document.querySelector("#adminTextModalEyebrow");
 const adminTextModalDescription = document.querySelector("#adminTextModalDescription");
 const adminTextModalLabel = document.querySelector("#adminTextModalLabel");
 const adminTextModalLabelText = document.querySelector("#adminTextModalLabel span");
@@ -456,7 +471,6 @@ function closeAdminTextModal(value = null) {
 
 function openAdminTextModal(options = {}) {
   const {
-    eyebrow = "Admin Confirm",
     title = "입력 확인",
     description = "",
     label = "입력",
@@ -470,7 +484,6 @@ function openAdminTextModal(options = {}) {
 
   return new Promise((resolve) => {
     adminTextModalResolver = resolve;
-    adminTextModalEyebrow.textContent = eyebrow;
     adminTextModalTitle.textContent = title;
     adminTextModalDescription.textContent = description;
     adminTextModalDescription.hidden = !description;
@@ -498,7 +511,6 @@ async function requestAdminApiToken(force = false) {
 
   adminTokenRequestPromise = (async () => {
     const next = await openAdminTextModal({
-      eyebrow: "Admin Token",
       title: "관리자 인증 토큰 입력",
       description: "관리자 데이터 조회와 저장을 위해 발급받은 API 토큰을 입력해주세요.",
       label: "관리자 API 토큰",
@@ -711,6 +723,7 @@ function clearCurrentAdminData() {
 
 async function loadAdminDataFromServer(options = {}) {
   const silent = Boolean(options.silent);
+  const pageKey = options.pageKey || getCurrentAdminPageKey();
   const token = await requestAdminApiToken();
   if (!token) {
     updateLastRefreshedDisplay();
@@ -734,7 +747,7 @@ async function loadAdminDataFromServer(options = {}) {
       brandHall: () => loadBrandHallFromServer({ silent: true }),
     };
     const scopeKeys = {
-      dashboard: Object.keys(loaders),
+      dashboard: ["applications", "approvedSellers", "messages", "customerQuotes", "visitStats", "sellerAccess", "brandHall"],
       customers: ["customerQuotes", "deletedQuoteLogs"],
       sellers: ["applications"],
       approvedSellers: ["approvedSellers"],
@@ -742,7 +755,7 @@ async function loadAdminDataFromServer(options = {}) {
       sellerAccess: ["sellerAccess"],
       alimtalk: ["messages"],
     };
-    const requestedKeys = scopeKeys[getCurrentAdminPageKey()] || scopeKeys.dashboard;
+    const requestedKeys = scopeKeys[pageKey] || scopeKeys.dashboard;
     const resolvedEntries = await Promise.all(
       requestedKeys.map(async (key) => [key, await loaders[key]()])
     );
@@ -813,6 +826,7 @@ async function loadAdminDataFromServer(options = {}) {
     }
 
     if (updatedCount > 0) {
+      if (results.every((result) => result?.ok)) loadedAdminScopes.add(pageKey);
       const refreshedAt = new Date().toISOString();
       localStorage.setItem(STORAGE_KEYS.adminLastRefreshedAt, refreshedAt);
       updateLastRefreshedDisplay(refreshedAt);
@@ -1449,30 +1463,38 @@ function renderDashboardWorkQueue() {
   const messages = getMessages();
   const consultations = readStorageArray(STORAGE_KEYS.brandConsultations);
   const workRows = [
-    { label: "고객 견적", count: quotes.filter((quote) => ["quote-bidding", "quote-choosing"].includes(quoteStatusMeta(quote).className)).length, note: "진행 중 견적을 확인하고 제안 현황을 관리합니다.", href: "/customers", page: "customers", action: "견적 관리" },
-    { label: "판매자 승인", count: applications.filter((application) => application.status === "pending").length, note: "검토 대기 중인 판매자 등록 요청입니다.", href: "/sellers", page: "sellers", action: "승인 검토" },
-    { label: "브랜드관 상담", count: consultations.filter((consultation) => ["new", "contacted", "negotiating"].includes(String(consultation.status || "new"))).length, note: "계약 및 정산 전 상담 요청을 확인합니다.", href: "/brand-hall", page: "brandHall", action: "상담 관리" },
+    { label: "진행 중 견적", count: Math.max(getCustomerQuoteSummary().active, quotes.filter((quote) => ["quote-bidding", "quote-choosing"].includes(quoteStatusMeta(quote).className)).length), href: "/customers", page: "customers" },
+    { label: "판매자 승인 대기", count: applications.filter((application) => application.status === "pending").length, href: "/sellers", page: "sellers" },
+    { label: "진행 중 상담", count: consultations.filter((consultation) => ["new", "contacted", "negotiating"].includes(String(consultation.status || "new"))).length, href: "/brand-hall", page: "brandHall" },
     { label: "알림톡 발송", count: messageSummary
       ? ["ready", "scheduled", "sending", "accepted", "failed"].reduce((sum, status) => sum + Number(messageSummary[status] || 0), 0)
       : messages.filter((message) => ["ready", "scheduled", "sending", "accepted", "failed"].includes(String(message.status || ""))).length,
-      note: "대기 또는 확인이 필요한 발송 건입니다.", href: "/alimtalk", page: "alimtalk", action: "발송 현황" },
+      href: "/alimtalk", page: "alimtalk" },
   ];
 
-  dashboardHome.classList.add("system-work-queue");
+  const recentQuotes = [...quotes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 6);
+  const pending = applications.filter((row) => row.status === "pending").sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || ''))).slice(0, 5);
   dashboardHome.innerHTML = `
-    <div class="system-panel-head">
-      <div><h2>처리 대기 업무</h2></div>
-    </div>
-    <div class="system-work-table" role="table" aria-label="오늘 처리할 업무">
-      <div class="system-work-row system-work-heading" role="row"><span>업무 구분</span><span>대기 건</span><span>처리 내용</span><span></span></div>
-      ${workRows.map((row) => `
-        <a class="system-work-row" href="${row.href}" data-admin-nav="${row.page}" role="row">
-          <strong>${escapeHTML(row.label)}</strong>
-          <b>${Number(row.count).toLocaleString("ko-KR")}건</b>
-          <span>${escapeHTML(row.note)}</span>
-          <em>${escapeHTML(row.action)}</em>
-        </a>
-      `).join("")}
+    <div class="ops-overview">
+      <section aria-labelledby="opsWorkTitle">
+        <div class="system-panel-head"><h2 id="opsWorkTitle">확인이 필요한 업무</h2></div>
+        <div class="ops-workload">${workRows.map((row) => `<a href="${row.href}" data-admin-nav="${row.page}"><span>${escapeHTML(row.label)}</span><b>${Number(row.count).toLocaleString("ko-KR")}<small>건</small></b></a>`).join('')}</div>
+      </section>
+      <div class="ops-dashboard-split">
+        <section aria-labelledby="opsRecentTitle">
+          <div class="system-panel-head"><h2 id="opsRecentTitle">최근 등록 견적</h2><a class="ops-link" href="/customers" data-admin-nav="customers">전체 보기 <span data-ops-icon="ChevronRight"></span></a></div>
+          <div class="ops-table-wrap"><table class="ops-recent-quotes"><thead><tr><th>견적번호</th><th>품목 / 지역</th><th>제안</th><th>상태</th></tr></thead><tbody>
+          ${recentQuotes.length ? recentQuotes.map((quote) => {
+            const status = quoteStatusMeta(quote);
+            return `<tr><td><a class="ops-link" href="/customers?q=${encodeURIComponent(quote.quoteNumber || '')}" data-admin-nav="customers">${escapeHTML(quote.quoteNumber || '-')}</a><small class="ops-table-meta">${escapeHTML(formatDate(quote.createdAt))}</small></td><td><strong>${escapeHTML(quote.items || '-')}</strong><small class="ops-table-meta">${escapeHTML(quote.region || '-')}</small></td><td>${Number(quote.bidCount || quote.bidsCount || 0)}건</td><td><span class="status ${status.className}">${escapeHTML(status.label)}</span></td></tr>`;
+          }).join('') : '<tr><td colspan="4" class="empty-table-cell">등록된 견적이 없습니다.</td></tr>'}
+          </tbody></table></div>
+        </section>
+        <section aria-labelledby="opsPendingTitle">
+          <div class="system-panel-head"><h2 id="opsPendingTitle">판매자 승인 대기</h2><a class="ops-link" href="/sellers" data-admin-nav="sellers">전체 보기 <span data-ops-icon="ChevronRight"></span></a></div>
+          <div class="ops-review-queue">${pending.length ? pending.map((row) => `<a class="ops-review-item" href="/sellers?applicationId=${encodeURIComponent(row.id)}" data-admin-nav="sellers"><span><strong>${escapeHTML(sellerName(row) || row.sellerId)}</strong><small>${escapeHTML(managerName(row))} · ${escapeHTML(formatDate(row.requestedAt))}</small></span><span class="status pending">승인 대기</span></a>`).join('') : '<p class="ops-overview-empty">승인 대기 중인 신청이 없습니다.</p>'}</div>
+        </section>
+      </div>
     </div>
   `;
 }
@@ -1573,8 +1595,6 @@ function renderStats() {
   const visitStats = getVisitStats();
   const todayVisitors = Number(visitStats.today?.uniqueVisitors || 0);
   const todayViews = Number(visitStats.today?.pageViews || 0);
-  const sevenDayVisitors = Number(visitStats.last7Days?.uniqueVisitors || 0);
-  const totalViews = Number(visitStats.total?.pageViews || 0);
   const sellerAccessStats = getSellerAccessSummary();
   const todaySellerAccess = Number(sellerAccessStats.today?.sellerCount || 0);
   const todaySellerLogins = Number(sellerAccessStats.today?.loginCount || 0);
@@ -1582,20 +1602,20 @@ function renderStats() {
 
   const dashboardStats = [
     {
-      label: "노출용 방문자",
-      value: `오늘 ${todayVisitors.toLocaleString("ko-KR")}명`,
-      note: `오늘 조회 ${todayViews.toLocaleString("ko-KR")}회 · 최근 7일 ${sevenDayVisitors.toLocaleString("ko-KR")}명 · 누적 조회 ${totalViews.toLocaleString("ko-KR")}회`,
+      label: "오늘 방문 고객",
+      value: `${todayVisitors.toLocaleString("ko-KR")}명`,
+      note: `페이지 조회 ${todayViews.toLocaleString("ko-KR")}회`,
       className: "visitor-summary-card",
     },
     {
       label: "고객 견적",
-      value: `누적 ${quoteSummary.total}건`,
-      note: `진행중 ${quoteSummary.active}건 · 종료견적 ${quoteSummary.closed}건 · 미선택견적 ${quoteSummary.unselected}건`,
+      value: `${quoteSummary.total.toLocaleString("ko-KR")}건`,
+      note: `진행 중 ${quoteSummary.active}건`,
       action: "customer-quotes",
       className: "quote-summary-card",
     },
-    { label: "승인 대기", value: `${pendingCount}건`, note: "검토 필요한 판매자 신청", action: "pending-applications" },
-    { label: "승인 판매자", value: `${approved.length}명`, note: "로그인 가능한 판매자 계정", action: "approved-sellers" },
+    { label: "판매자 승인 대기", value: `${pendingCount}건`, note: `반려 ${rejectedCount}건`, action: "pending-applications" },
+    { label: "승인 판매자", value: `${approved.length}명`, note: `오늘 접속 ${todaySellerAccess}명`, action: "approved-sellers" },
     { label: "판매자 접속", value: `오늘 ${todaySellerAccess}명`, note: `오늘 로그인 ${todaySellerLogins}회 · 최근 7일 ${weekSellerAccess}명`, action: "seller-access" },
     { label: "알림톡 대기", value: `${readyMessages}건`, note: `발송 완료 ${sentMessages}건`, action: "ready-messages" },
     { label: "반려 신청", value: `${rejectedCount}건`, note: "반려 이력 보관", action: "rejected-applications" },
@@ -1614,7 +1634,7 @@ function renderStats() {
     alimtalk: [dashboardStats[5], { label: "발송 완료", value: `${sentMessages}건`, note: "전체 발송 기록" }, { label: "실패", value: `${messageSummary ? Number(messageSummary.failed || 0) : messages.filter((row) => row.status === "failed").length}건`, note: "발송 결과 확인 필요" }],
     brandHall: [{ label: "등록 패키지", value: `${getBrandPackagesAdmin().length}건`, note: "조회된 패키지" }, { label: "상담 접수", value: `${getBrandConsultationsAdmin().length}건`, note: "조회된 상담 내역" }],
   };
-  const stats = statsByPage[getCurrentAdminPageKey()] || dashboardStats;
+  const stats = statsByPage[getCurrentAdminPageKey()] || [dashboardStats[1], dashboardStats[2], dashboardStats[3], dashboardStats[0]];
 
   statGrid.innerHTML = stats
     .map((stat) => {
@@ -1901,7 +1921,8 @@ async function queueManualApplicationTalk(applicationId) {
 }
 
 function renderApprovedSellers() {
-  const approved = getApprovedSellers();
+  const search = String(document.querySelector('#approvedSellerSearch')?.value || '').trim().toLowerCase();
+  const approved = getApprovedSellers().filter((seller) => !search || [seller.sellerId, seller.channel, seller.branch, seller.branchRegion, seller.manager].some((value) => String(value || '').toLowerCase().includes(search)));
 
   approvedSellerRows.innerHTML = approved.length
     ? approved.map((seller) => `
@@ -1929,7 +1950,7 @@ function renderApprovedSellers() {
         </td>
       </tr>
     `).join("")
-    : `<tr><td colspan="6">아직 승인된 판매자가 없습니다.</td></tr>`;
+    : `<tr><td colspan="6" class="empty-table-cell">${search ? "검색 결과가 없습니다." : "아직 승인된 판매자가 없습니다."}</td></tr>`;
 }
 
 const ADMIN_QUOTE_RECEIVE_HOURS = 72;
@@ -2123,7 +2144,6 @@ function quoteSubmissionAuditSummary(quote) {
 
 async function revealQuoteSubmissionAudit(quoteId) {
   const reason = await openAdminTextModal({
-    eyebrow: "Privacy Audit",
     title: "원본 IP 조회",
     description: "조회 사유와 관리자 접속기록이 서버에 함께 저장됩니다.",
     label: "조회 사유",
@@ -2874,6 +2894,7 @@ function renderAll() {
   document.querySelectorAll("[data-message-filter]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.messageFilter === messageFilter);
   });
+  document.dispatchEvent(new CustomEvent('ops:render'));
 }
 
 document.addEventListener("click", (event) => {
@@ -2886,7 +2907,6 @@ document.addEventListener("click", (event) => {
   if (revealPhoneButton) {
     void (async () => {
       const confirmed = await openAdminTextModal({
-        eyebrow: "개인정보 열람",
         title: "고객 번호를 열람할까요?",
         description: "등록 후 7일 이내에만 열람할 수 있으며, 열람 기록이 저장됩니다.",
         confirmText: "번호 열람",
@@ -2931,6 +2951,7 @@ document.addEventListener("click", (event) => {
   if (applicationCard) {
     selectedApplicationId = applicationCard.dataset.applicationId;
     renderApplications();
+    if (matchMedia('(max-width: 760px)').matches) applicationDetail.scrollIntoView({ behavior: 'auto', block: 'start' });
     return;
   }
 
@@ -3172,12 +3193,22 @@ document.addEventListener("click", (event) => {
   // 실제 URL을 열어야 각 도구의 전용 스크립트가 정상 실행됩니다.
   const pageKey = link.dataset.adminNav || adminPageKeyFromPath(url.pathname);
   if (!ADMIN_PAGE_CONFIG[pageKey]) return;
+  if (url.searchParams.has('applicationId')) {
+    selectedApplicationId = url.searchParams.get('applicationId');
+    applicationFilter = 'all';
+  }
+  if (url.searchParams.has('q')) {
+    customerQuoteSearchTerm = url.searchParams.get('q');
+    customerQuotePage = 1;
+  }
   event.preventDefault();
   navigateAdminPage(pageKey);
 });
 
 window.addEventListener("popstate", () => {
   renderAll();
+  if (getCurrentAdminPageKey() === 'alimtalk') void refreshAlimtalkPage();
+  else void ensureAdminScope();
   window.scrollTo({ top: 0, behavior: "auto" });
 });
 
@@ -3187,6 +3218,7 @@ applicationSearch.addEventListener("input", () => {
 });
 
 sellerAccessSearch?.addEventListener("input", renderSellerAccessLogs);
+document.querySelector('#approvedSellerSearch')?.addEventListener('input', renderApprovedSellers);
 sellerAccessDays?.addEventListener("change", async () => {
   const token = await requestAdminApiToken();
   if (!token) return;
@@ -3212,9 +3244,7 @@ adminAuthBtn?.addEventListener("click", async () => {
   showToast(status?.ok
     ? `관리자 인증이 완료되었습니다. (${status.tokenSource || "Cloudflare Secret"})`
     : status?.message || "관리자 인증에 실패했습니다.");
-  if (status?.ok) {
-    showToast("인증이 완료되었습니다. 서버 데이터는 새로고침 버튼을 눌러 불러오세요.");
-  }
+  if (status?.ok) void ensureAdminScope();
 });
 
 refreshBtn.addEventListener("click", async () => {
@@ -3226,6 +3256,7 @@ refreshBtn.addEventListener("click", async () => {
   } finally {
     refreshBtn.disabled = false;
     refreshBtn.textContent = "새로고침";
+    document.dispatchEvent(new CustomEvent('ops:render'));
   }
 });
 
@@ -3241,10 +3272,12 @@ if (initialApplicationIdFromUrl) {
   selectedApplicationId = initialApplicationIdFromUrl;
   applicationFilter = "all";
 }
+customerQuoteSearchTerm = new URLSearchParams(window.location.search).get('q') || '';
 
 updateLastRefreshedDisplay();
 renderAll();
 if (getCurrentAdminPageKey() === "alimtalk") void refreshAlimtalkPage();
+else void ensureAdminScope();
 visitStatsRefreshTimer = window.setInterval(refreshVisitStatsOnly, 5 * 60 * 1000);
 customerQuotesRefreshTimer = window.setInterval(refreshCustomerQuotesOnly, 30 * 1000);
 
