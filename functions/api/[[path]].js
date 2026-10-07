@@ -7,7 +7,7 @@
 };
 
 import builtInSubscriptionImageMap from "../data/subscription-image-map.js";
-import { protectCustomerPhone, readCustomerPhone, customerPhoneWithinSevenDays, fullyMaskCustomerPhone } from "../phone-vault.js";
+import { protectCustomerPhone, readCustomerPhone, customerPhoneWithinSevenDays, customerPhoneRetained, customerPhoneAccessExpiresAt, customerPersonalExpiresAt, fullyMaskCustomerPhone, maskPhoneInMessage } from "../phone-vault.js";
 
 const SOLAPI_DEFAULTS = {
   SOLAPI_CHANNEL_ID: "KA01PF260720091629575EzVmd2YRyU7",
@@ -440,28 +440,26 @@ function normalizeApprovedSeller(row) {
   };
 }
 
-function normalizeMessage(row) {
+function normalizeMessage(row, internal = false) {
   if (!row) return null;
-  const variables = parseJson(row.variables_json, {});
-  for (const key of Object.keys(variables)) {
-    if (/고객.*(연락처|전화|휴대폰)/.test(key)) variables[key] = fullyMaskCustomerPhone(variables[key]);
-  }
+  const safe = internal === true ? (value) => value : maskPhoneInMessage;
+  const variables = safe(parseJson(row.variables_json, {}));
   return {
     id: row.id,
     status: row.status,
     type: row.type,
     targetRole: row.target_role || "",
     targetName: row.target_name || "",
-    targetPhone: row.target_role === "customer" ? fullyMaskCustomerPhone(row.target_phone) : (row.target_phone || ""),
+    targetPhone: internal !== true && row.target_role === "customer" ? fullyMaskCustomerPhone(row.target_phone) : (row.target_phone || ""),
     title: row.title,
-    body: row.body,
+    body: safe(row.body),
     relatedId: row.related_id || "",
     templateId: row.template_id || "",
     variables,
     solapiGroupId: row.solapi_group_id || "",
     solapiMessageId: row.solapi_message_id || "",
-    errorMessage: row.error_message || "",
-    solapiResponse: parseJson(row.solapi_response_json, null),
+    errorMessage: safe(row.error_message || ""),
+    solapiResponse: safe(parseJson(row.solapi_response_json, null)),
     scheduledAt: row.scheduled_at || "",
     createdAt: row.created_at || "",
     sentAt: row.sent_at || "",
@@ -496,6 +494,8 @@ function normalizeCustomerQuote(row, images = []) {
     memo: row.memo || "",
     status: row.status || "open",
     selectedBidId: row.selected_bid_id || null,
+    selectedAt: row.selected_at || "",
+    phoneAccessExpiresAt: customerPhoneAccessExpiresAt(row),
     bidCount: Number(row.bid_count || bids.length || 0),
     bids,
     saleCompletedAt: row.sale_completed_at || "",
@@ -503,7 +503,7 @@ function normalizeCustomerQuote(row, images = []) {
     thumbnailImageKey: row.thumbnail_image_key || "",
     quoteExpiresAt: row.quote_expires_at || "",
     fullImagesExpiresAt: row.full_images_expires_at || "",
-    personalExpiresAt: row.personal_expires_at || "",
+    personalExpiresAt: customerPersonalExpiresAt(row),
     createdAt: row.created_at || "",
     consent: parseJson(row.consent_json, {}),
     submissionAudit: {
@@ -1061,6 +1061,7 @@ async function ensureCustomerQuoteColumns(env) {
   const statements = [
     "ALTER TABLE customer_quotes ADD COLUMN phone_hash TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN phone_ciphertext TEXT DEFAULT ''",
+    "ALTER TABLE customer_quotes ADD COLUMN selected_at TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN thumbnail_image_key TEXT DEFAULT ''",
     "ALTER TABLE customer_quotes ADD COLUMN quote_expires_at TEXT DEFAULT ''",
@@ -1182,11 +1183,11 @@ async function revealCustomerPhone(env, request, quoteId) {
     return json({ ok: false, message: "관리자 토큰을 다시 확인해주세요." }, 403);
   }
   await ensureCustomerQuoteColumns(env);
-  const quote = await env.DB.prepare("SELECT id, phone, phone_hash, phone_ciphertext, created_at FROM customer_quotes WHERE id = ? LIMIT 1")
+  const quote = await env.DB.prepare("SELECT id, phone, phone_hash, phone_ciphertext, created_at, selected_at, selected_bid_id FROM customer_quotes WHERE id = ? LIMIT 1")
     .bind(quoteId).first();
   if (!quote) return json({ ok: false, message: "고객 견적을 찾을 수 없습니다." }, 404);
   if (!customerPhoneWithinSevenDays(quote)) {
-    return json({ ok: false, message: "7일의 열람 기간이 지났습니다." }, 410);
+    return json({ ok: false, message: "선택일부터 7일 이내에만 열람할 수 있습니다. 견적 등록 후 30일이 되면 전체 정보가 삭제됩니다." }, 410);
   }
   const phone = await readCustomerPhone(env, quote);
   if (!phone) return json({ ok: false, message: "열람 가능한 연락처가 없습니다." }, 404);
@@ -1195,7 +1196,8 @@ async function revealCustomerPhone(env, request, quoteId) {
     (id, quote_id, reason, admin_token_hash, requester_ip_masked, requester_ip_hash, viewed_at)
     VALUES (?, ?, ?, ?, '', '', ?)`)
     .bind(createId("phone-view"), quoteId, "customer_phone_reveal", await sha256Hex(reauth), new Date().toISOString()).run();
-  return json({ ok: true, phone });
+  if (!customerPhoneWithinSevenDays(quote)) return json({ ok: false, message: "연락처 열람 기간이 종료되었습니다." }, 410);
+  return json({ ok: true, phone, phoneAccessExpiresAt: customerPhoneAccessExpiresAt(quote) });
 }
 
 async function ensureQuoteAuditAccessLogTable(env) {
@@ -1433,8 +1435,8 @@ async function updateCustomerQuote(env, request, id) {
   if (!nextCustomer || !nextItems) {
     return json({ ok: false, message: "고객명과 품목은 필수입니다." }, 400);
   }
-  if (nextPhone && !customerPhoneWithinSevenDays(existing)) {
-    return json({ ok: false, message: "7일이 지나 연락처를 수정할 수 없습니다." }, 410);
+  if (nextPhone && !customerPhoneRetained(existing)) {
+    return json({ ok: false, message: "연락처 보관 기간이 지나 수정할 수 없습니다." }, 410);
   }
   const protectedPhone = nextPhone || existing.phone
     ? await protectCustomerPhone(env, nextPhone || existing.phone) : null;
@@ -1455,7 +1457,7 @@ async function updateCustomerQuote(env, request, id) {
       nextCustomer,
       "",
       protectedPhone?.hash || existing.phone_hash || "",
-      customerPhoneWithinSevenDays(existing) ? (protectedPhone?.ciphertext || existing.phone_ciphertext || "") : "",
+      customerPhoneRetained(existing) ? (protectedPhone?.ciphertext || existing.phone_ciphertext || "") : "",
       nextItems,
       String(body.purchasePurpose || "").trim(),
       normalizeQuoteBrand(body.desiredBrand || body.desired_brand || body.brand || ""),
@@ -1718,7 +1720,7 @@ async function updateAlimtalk(env, request, id) {
 async function resendAlimtalk(env, id) {
   await ensureAlimtalkColumns(env);
   const row = normalizeMessage(
-    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
+    await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first(), true
   );
   if (!row) return json({ ok: false, message: "알림톡 정보를 찾을 수 없습니다." }, 404);
   if (
@@ -1743,7 +1745,7 @@ async function resendAlimtalk(env, id) {
   const updated = normalizeMessage(
     await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first()
   );
-  return json({ ok: Boolean(result.ok), row: updated, message: result.ok ? "알림톡을 재발송했습니다." : result.error || "알림톡 재발송에 실패했습니다." });
+  return json({ ok: Boolean(result.ok), row: updated, message: result.ok ? "알림톡을 재발송했습니다." : maskPhoneInMessage(result.error) || "알림톡 재발송에 실패했습니다." });
 }
 
 function getSolapiHealth(env) {

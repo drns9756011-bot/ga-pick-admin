@@ -2232,7 +2232,7 @@ function renderCustomerQuotes() {
               <div>
                 <strong>${escapeHTML(quote.items || "품목 미입력")}</strong>
                 <p>${escapeHTML(quote.customer || "-")} · ***-****-****</p>
-                ${Date.now() < Date.parse(quote.createdAt || "") + 7 * 86400000 ? `<button class="plain-btn small-btn" type="button" data-reveal-customer-phone="${escapeHTML(quote.id)}">번호 열람</button>` : ""}
+                ${quote.selectedBidId && Date.now() < Date.parse(quote.phoneAccessExpiresAt || "") ? `<button class="plain-btn small-btn" type="button" data-reveal-customer-phone="${escapeHTML(quote.id)}">번호 열람</button>` : ""}
               </div>
               <span class="status ${status.className}" data-admin-quote-status data-quote-id="${escapeHTML(quote.id)}">견적 상태 · ${status.label}</span>
             </div>
@@ -2908,7 +2908,7 @@ document.addEventListener("click", (event) => {
     void (async () => {
       const confirmed = await openAdminTextModal({
         title: "고객 번호를 열람할까요?",
-        description: "등록 후 7일 이내에만 열람할 수 있으며, 열람 기록이 저장됩니다.",
+        description: "판매자 선택 후 7일 이내에만 열람할 수 있으며, 열람 기록이 저장됩니다. 등록 후 30일에는 전체 정보가 삭제됩니다.",
         confirmText: "번호 열람",
         confirmOnly: true,
       });
@@ -2922,9 +2922,10 @@ document.addEventListener("click", (event) => {
       });
       if (!result?.ok) return showToast(result?.message || "번호를 열람하지 못했습니다.");
       const element = document.querySelector(`[data-customer-phone="${CSS.escape(quoteId)}"]`);
-      if (element) {
+      const remaining = Date.parse(result.phoneAccessExpiresAt || "") - Date.now();
+      if (element && remaining > 0) {
         element.textContent = formatPhoneNumber(result.phone);
-        window.setTimeout(() => { if (element.isConnected) element.textContent = "***-****-****"; }, 60000);
+        window.setTimeout(() => { if (element.isConnected) element.textContent = "***-****-****"; }, Math.min(60000, remaining));
       }
     })();
     return;

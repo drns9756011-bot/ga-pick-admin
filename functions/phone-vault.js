@@ -1,3 +1,6 @@
+import { customerPhoneRetained } from "./quote-retention.js";
+export { customerPhoneWithinSevenDays, customerPhoneRetained, customerPhoneAccessExpiresAt, customerPersonalExpiresAt } from "./quote-retention.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -45,17 +48,19 @@ export async function protectCustomerPhone(env, phone) {
   };
 }
 
-export function customerPhoneWithinSevenDays(row, now = Date.now()) {
-  const createdAt = Date.parse(row?.created_at || "");
-  return Number.isFinite(createdAt) && now < createdAt + 7 * 86400000;
-}
-
 export function fullyMaskCustomerPhone(value) {
   return value ? "***-****-****" : "";
 }
 
+export function maskPhoneInMessage(value) {
+  if (typeof value === "string") return value.replace(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/g, "***-****-****");
+  if (Array.isArray(value)) return value.map(maskPhoneInMessage);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, maskPhoneInMessage(item)]));
+  return value;
+}
+
 export async function readCustomerPhone(env, row) {
-  if (!row || !customerPhoneWithinSevenDays(row)) return "";
+  if (!row || !customerPhoneRetained(row)) return "";
   if (!row.phone_ciphertext) return String(row.phone || "").replace(/\D/g, "");
   const [version, encodedIv, encodedCiphertext] = String(row.phone_ciphertext).split(":");
   if (version !== "v1" || !encodedIv || !encodedCiphertext) throw new Error("Invalid customer phone ciphertext");
