@@ -9,6 +9,7 @@
   const navIcons = {
     '/': 'LayoutDashboard', '/customers': 'Files', '/sellers': 'UserRoundPlus',
     '/approved-sellers': 'UsersRound', '/seller-access': 'History',
+    '/lead-customers': 'UsersRound',
     '/brand-hall': 'Store', '/subscription-products': 'Package',
     '/alimtalk': 'Send', '/anonymous-consultation': 'ShieldCheck',
     '/anonymous-chat': 'MessagesSquare',

@@ -10,6 +10,7 @@ if (output !== join(root, "deploy-assets")) throw new Error("Invalid asset outpu
 
 const files = [
   "index.html", "admin.html", "admin.js", "admin.css",
+  "lead-workspace.js", "lead-workspace.css",
   "admin-workspace.css", "admin-workspace.js", "admin-console.css",
   "admin-enterprise.css", "admin-enterprise-v6.css", "admin-system.css",
   "favicon.ico", "favicon.svg", "favicon.png", "favicon-16x16.png",
@@ -21,6 +22,7 @@ const directories = [
   "alimtalk", "approved-sellers", "brand-hall", "customers",
   "seller-access", "sellers", "anonymous-chat", "anonymous-consultation",
   "subscription-products", "assets", "vendor",
+  "lead-customers",
 ];
 
 await rm(output, { recursive: true, force: true });

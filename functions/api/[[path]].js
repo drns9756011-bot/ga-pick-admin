@@ -7,6 +7,7 @@
 };
 
 import builtInSubscriptionImageMap from "../data/subscription-image-map.js";
+import { handleLeads } from '../assigned-leads.js';
 import { protectCustomerPhone, readCustomerPhone, customerPhoneWithinSevenDays, customerPhoneRetained, customerPhoneAccessExpiresAt, customerPersonalExpiresAt, fullyMaskCustomerPhone, maskPhoneInMessage } from "../phone-vault.js";
 
 const SOLAPI_DEFAULTS = {
@@ -2112,6 +2113,9 @@ export async function onRequest(context) {
   if (!env.DB) return json({ ok: false, message: "D1 DB 바인딩(DB)이 필요합니다." }, 500);
   const denied = requireAdmin(request, env);
   if (denied) return denied;
+  if (path === 'assigned-leads' || path.startsWith('assigned-leads/')) {
+    return handleLeads(env, request, path, { admin: true });
+  }
   if (path.startsWith("files/") && method === "GET") {
     return getFile(env, decodeURIComponent(pathParts.slice(1).join("/")));
   }

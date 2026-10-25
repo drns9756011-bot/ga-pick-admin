@@ -15,6 +15,12 @@ const STORAGE_KEYS = {
 };
 localStorage.removeItem(STORAGE_KEYS.customerQuotes);
 const PUBLIC_API_BASE = "https://ga-pick.com";
+if (!document.querySelector('.side-nav a[href="/lead-customers"]')) {
+  const link = document.createElement('a');
+  link.href = '/lead-customers';
+  link.textContent = '고객 DB 배정';
+  document.querySelector('.side-nav')?.append(link);
+}
 localStorage.removeItem("pickquoteDeletedQuoteLogs");
 
 if (!document.querySelector('.side-nav a[href="/subscription-products"]')) {
