@@ -39,6 +39,33 @@ let applicationFilter = "pending";
 let messageFilter = "all";
 let selectedApplicationId = "";
 let messageStatusSyncPromise = null;
+let messageStatusTimer = 0;
+let messageStatusCursor = "";
+let messageStatusPaused = false;
+
+function alimtalkCheckDelay(now = Date.now()) {
+  const korea = new Date(now + 9 * 3600000);
+  const hour = korea.getUTCHours();
+  if (hour >= 9 && hour < 20) return 30000;
+  const next = new Date(korea);
+  if (hour >= 20) next.setUTCDate(next.getUTCDate() + 1);
+  next.setUTCHours(9, 0, 0, 0);
+  return next.getTime() - korea.getTime();
+}
+
+function scheduleMessageStatusCheck() {
+  window.clearTimeout(messageStatusTimer);
+  if (messageStatusPaused || getCurrentAdminPageKey() !== "alimtalk" || document.hidden || !readAdminApiToken()) return;
+  const pending = getMessages().some((row) => ["ready", "accepted", "sending", "scheduled"].includes(row.status));
+  if (!pending && !messageStatusCursor) return;
+  messageStatusTimer = window.setTimeout(async () => {
+    if (getCurrentAdminPageKey() !== "alimtalk" || document.hidden || !readAdminApiToken()) return;
+    if (alimtalkCheckDelay() === 30000) await syncPendingMessageStatuses({ automatic: true });
+    scheduleMessageStatusCheck();
+  }, alimtalkCheckDelay());
+}
+
+document.addEventListener("visibilitychange", scheduleMessageStatusCheck);
 let messageSummary = null;
 let messageHasMore = false;
 let messageSyncError = "알림톡 기록을 서버에서 불러오지 못했습니다. 새로고침 후에도 반복되면 배포 상태를 확인해주세요.";
@@ -899,25 +926,28 @@ async function refreshMessageStatus(messageId) {
     showToast(result?.message || "알림톡 상태 확인에 실패했습니다.");
     return;
   }
+  messageStatusPaused = false;
   if (result.row) updateMessage(messageId, (message) => Object.assign(message, result.row));
-  showToast("알림톡 최종 상태를 확인했습니다.");
+  showToast(`알림톡 상태: ${statusLabel(result.row?.status || "ready")}`);
 }
 
 function syncPendingMessageStatuses(options = {}) {
   if (messageStatusSyncPromise) return messageStatusSyncPromise;
+  if (!options.automatic) messageStatusPaused = false;
   const button = document.querySelector("#alimtalkSyncBtn");
   if (button) button.disabled = true;
   messageStatusSyncPromise = (async () => {
-    let cursor = "";
+    let cursor = options.automatic ? messageStatusCursor : "";
     let checked = 0;
     let updated = 0;
     let missing = 0;
     do {
       const result = await apiJson("/api/alimtalk/refresh-batch", {
         method: "POST", silent: true,
-        body: JSON.stringify({ cursor, limit: options.all ? 100 : 10 }),
+        body: JSON.stringify({ cursor, limit: options.all ? 100 : 10, automatic: Boolean(options.automatic) }),
       });
       if (!result?.ok) {
+        messageStatusPaused = true;
         showToast(result?.message || "발송 결과 동기화에 실패했습니다.");
         return;
       }
@@ -925,13 +955,19 @@ function syncPendingMessageStatuses(options = {}) {
       updated += Number(result.updated || 0);
       missing += Number(result.missing || 0);
       cursor = result.nextCursor || "";
+      if (options.automatic) messageStatusCursor = cursor;
       if (button) button.textContent = `발송 결과 확인 ${checked}건`;
     } while (options.all && cursor);
-    if (checked) {
+    if (checked || options.automatic) {
       const latest = await loadAlimtalkMessagesFromServer({ silent: true });
       if (latest?.ok && Array.isArray(latest.rows)) {
-        setMessages(latest.rows);
-        renderAll();
+        const merged = new Map(getMessages().map((row) => [row.id, row]));
+        latest.rows.forEach((row) => merged.set(row.id, row));
+        setMessages([...merged.values()]);
+        if (getCurrentAdminPageKey() === "alimtalk") {
+          renderMessages();
+          renderStatsCards();
+        }
       }
     }
     if (options.all) showToast(`발송 결과 ${updated}건 갱신 · ${checked}건 확인${missing ? ` · 미확인 ${missing}건` : ""}`);
@@ -941,6 +977,7 @@ function syncPendingMessageStatuses(options = {}) {
       button.textContent = "발송 결과 동기화";
     }
     messageStatusSyncPromise = null;
+    scheduleMessageStatusCheck();
   });
   return messageStatusSyncPromise;
 }
@@ -950,7 +987,8 @@ async function refreshAlimtalkPage() {
   if (!result?.ok || !Array.isArray(result.rows)) return;
   setMessages(result.rows);
   renderAll();
-  await syncPendingMessageStatuses();
+  if (alimtalkCheckDelay() === 30000) await syncPendingMessageStatuses({ automatic: true });
+  scheduleMessageStatusCheck();
 }
 
 async function deleteMessage(messageId) {
@@ -2417,7 +2455,7 @@ function renderMessages() {
           <span class="meta-line">작성 ${escapeHTML(formatDate(message.createdAt))}${message.scheduledAt ? ` · 예약 ${escapeHTML(formatDate(message.scheduledAt))}` : ""}${message.sentAt ? ` · 발송 ${escapeHTML(formatDate(message.sentAt))}` : ""}</span>
           <div class="message-actions">
             <button class="ghost-btn" type="button" data-resend-message="${escapeHTML(message.id)}" ${isFutureScheduled ? "disabled title=\"예약 발송 시각 이후에 사용할 수 있습니다.\"" : ""}>${isFutureScheduled ? "예약 대기" : "재발송 요청"}</button>
-            <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}" ${message.solapiGroupId ? "" : "disabled title=\"솔라피 조회 ID가 없습니다.\""}>상태 확인</button>
+            <button class="ghost-btn" type="button" data-refresh-message="${escapeHTML(message.id)}" ${message.solapiGroupId || message.solapiMessageId ? "" : "disabled title=\"솔라피 조회 ID가 없습니다.\""}>상태 확인</button>
             <button class="danger-btn small-btn" type="button" data-delete-message="${escapeHTML(message.id)}">삭제</button>
           </div>
         </article>
@@ -2869,6 +2907,7 @@ function renderBrandHallAdmin() {
 }
 
 function renderAll() {
+  scheduleMessageStatusCheck();
   const pageKey = getCurrentAdminPageKey();
   renderStatsCards();
   if (pageKey === "dashboard") {

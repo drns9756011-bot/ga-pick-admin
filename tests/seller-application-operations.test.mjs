@@ -126,7 +126,7 @@ test("Solapi delivery result changes accepted to sent", async () => {
   }
 });
 
-test("batch reconciliation checks messages in one date-bounded Solapi list request", async () => {
+test("batch reconciliation targets exact message IDs in one Solapi request", async () => {
   const state = makeEnv();
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -135,6 +135,7 @@ test("batch reconciliation checks messages in one date-bounded Solapi list reque
     const target = new URL(url);
     assert.equal(target.pathname, "/messages/v4/list");
     assert.equal(target.searchParams.get("limit"), "500");
+    assert.deepEqual(JSON.parse(target.searchParams.get("messageIds")), ["message-1"]);
     return new Response(JSON.stringify({ messageList: { "message-1": { messageId: "message-1", statusCode: "4000" } } }), { status: 200 });
   };
   try {
@@ -154,4 +155,38 @@ test("batch reconciliation checks messages in one date-bounded Solapi list reque
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("message ID alone supports lookup and 3xxx failures are not sending", async () => {
+  const state = makeEnv();
+  state.message.solapi_group_id = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.deepEqual(JSON.parse(new URL(url).searchParams.get("messageIds")), ["message-1"]);
+    return Response.json({ messageList: { "message-1": { messageId: "message-1", statusCode: "3104", reason: "카카오톡 미사용자" } } });
+  };
+  try {
+    const response = await onRequest({
+      request: new Request("https://admin.example/api/alimtalk/talk-1/refresh", { method: "POST", headers: { "X-Admin-Token": "test-token" } }),
+      env: state.env, params: { path: ["alimtalk", "talk-1", "refresh"] },
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.row.status, "failed");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("automatic reconciliation does not query provider during Korean quiet hours", async () => {
+  const state = makeEnv();
+  const originalNow = Date.now;
+  const originalFetch = globalThis.fetch;
+  Date.now = () => Date.parse("2026-10-25T11:00:00Z");
+  globalThis.fetch = async () => { throw new Error("must not query at 20:00 KST"); };
+  try {
+    const response = await onRequest({
+      request: new Request("https://admin.example/api/alimtalk/refresh-batch", { method: "POST", headers: { "X-Admin-Token": "test-token" }, body: JSON.stringify({ automatic: true }) }),
+      env: state.env, params: { path: ["alimtalk", "refresh-batch"] },
+    });
+    assert.equal((await response.json()).paused, true);
+  } finally { Date.now = originalNow; globalThis.fetch = originalFetch; }
 });
