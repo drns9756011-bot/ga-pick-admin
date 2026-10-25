@@ -1609,11 +1609,23 @@ async function refreshAlimtalkStatus(env, id) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: payload.errorMessage || payload.message || "솔라피 조회에 실패했습니다." }, 502);
   const messageList = payload.messageList || {};
-  const messages = Array.isArray(messageList) ? messageList : Object.values(messageList);
-  const message = row.solapiMessageId
+  const messages = Array.isArray(messageList) ? messageList : Object.entries(messageList).map(([id, item]) => ({ ...item, messageId: item.messageId || id }));
+  let message = row.solapiMessageId
     ? messages.find((item) => item.messageId === row.solapiMessageId)
     : messages.length === 1 ? messages[0] : null;
-  if (!message) return json({ ok: false, message: "해당 알림톡의 발송 결과를 찾지 못했습니다." }, 409);
+  let groupCount = 0;
+  if (!message && row.solapiGroupId) {
+    const groupResponse = await fetch(`https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapiGroupId)}/messages?limit=100`, {
+      headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000),
+    });
+    const groupPayload = await groupResponse.json().catch(() => ({}));
+    if (!groupResponse.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: groupPayload.errorMessage || groupPayload.message || "솔라피 그룹 조회에 실패했습니다." }, 502);
+    const list = groupPayload.messageList || {};
+    const groupMessages = Array.isArray(list) ? list : Object.entries(list).map(([id, item]) => ({ ...item, messageId: item.messageId || id }));
+    groupCount = groupMessages.length;
+    message = row.solapiMessageId ? groupMessages.find((item) => item.messageId === row.solapiMessageId) : groupMessages.length === 1 ? groupMessages[0] : null;
+  }
+  if (!message) return json({ ok: false, message: `발송 결과 미확인: 메시지 ${row.solapiMessageId || "없음"}, 그룹 ${row.solapiGroupId || "없음"} (목록 ${messages.length}건, 그룹 ${groupCount}건). 발송 계정과 조회 계정을 확인해주세요.` }, 409);
   const outcome = solapiMessageStatus(message);
   if (!outcome) return json({ ok: false, message: "솔라피가 아직 최종 상태를 제공하지 않았습니다." }, 409);
   const sentAt = outcome.status === "sent" ? (row.sentAt || message.dateReceived || new Date().toISOString()) : "";
