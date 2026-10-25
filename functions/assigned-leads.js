@@ -1,4 +1,5 @@
 import { protectCustomerPhone, readCustomerPhone } from './phone-vault.js';
+import { ensureLeadPayments, leadEntitlement, paidAssignment } from './lead-payments.js';
 
 const states = ['new', 'contacted', 'followup', 'won', 'closed'];
 const schemas = new WeakMap();
@@ -51,6 +52,7 @@ export async function ensureLeadSchema(env) {
     schemas.set(env.DB, pending);
   }
   await schemas.get(env.DB);
+  await ensureLeadPayments(env);
 }
 export async function purgeExpiredLeads(env, now = new Date().toISOString()) {
   await ensureLeadSchema(env);
@@ -68,12 +70,13 @@ export async function handleLeads(env, request, path, actor) {
     const parts = path.split('/');
     const method = request.method;
     const url = new URL(request.url);
+    if (!actor.admin && !(await leadEntitlement(env, actor.sellerId)).access) return reply({ ok: false, code: 'LEAD_ACCESS_REQUIRED', message: '고객DB 신청 후 이용해주세요.' }, 403);
     if (parts.length === 1 && method === 'GET') {
       const page = Math.min(10000, Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1)));
       const search = field(url.searchParams.get('q'), 80);
       const status = field(url.searchParams.get('status'), 20);
       const where = ['l.expires_at > ?']; const args = [now];
-      if (!actor.admin) { where.push("a.seller_id = ? AND a.revoked_at = ''"); args.push(actor.sellerId); }
+      if (!actor.admin) { where.push("a.seller_id = ? AND a.revoked_at = ''", paidAssignment('a')); args.push(actor.sellerId); }
       if (search) { where.push('(l.name LIKE ? OR l.region LIKE ? OR l.items LIKE ?)'); args.push(...Array(3).fill(`%${search}%`)); }
       if (!actor.admin && states.includes(status)) { where.push('a.status = ?'); args.push(status); }
       const from = actor.admin ? 'assigned_leads l' : 'lead_assignments a JOIN assigned_leads l ON l.id = a.lead_id';
@@ -91,7 +94,10 @@ export async function handleLeads(env, request, path, actor) {
       return reply({ ok: true, rows, page, hasMore: result.results.length > 25 });
     }
     if (actor.admin && parts[1] === 'managers' && method === 'GET') {
-      const result = await env.DB.prepare("SELECT seller_id, channel, branch, manager FROM approved_sellers WHERE status = 'approved' ORDER BY manager LIMIT 1000").all();
+      const result = await env.DB.prepare(`SELECT s.seller_id, s.channel, s.branch, s.manager,
+        (SELECT COALESCE(SUM(o.quantity - (SELECT count(*) FROM lead_credit_usage u WHERE u.order_id=o.id)),0)
+        FROM lead_orders o WHERE o.seller_id=s.seller_id AND o.status='paid' AND o.mode='live') AS remaining
+        FROM approved_sellers s WHERE s.status='approved' ORDER BY s.manager LIMIT 1000`).all();
       return reply({ ok: true, rows: result.results });
     }
     if (actor.admin && parts.length === 1 && method === 'POST') {
@@ -132,11 +138,17 @@ export async function handleLeads(env, request, path, actor) {
       if (body.consentConfirmed !== true) fail('해당 매니저에 대한 제공 동의를 확인해주세요.');
       const seller = field(body.sellerId, 100, true); const consent = field(body.consentRef, 300, true);
       // Capacity and eligibility are checked inside the write, including revoked historical recipients.
-      const result = await env.DB.prepare(`INSERT INTO lead_assignments (id,lead_id,seller_id,consent_ref,assigned_at,updated_at)
+      const assignmentId = crypto.randomUUID();
+      const available = `SELECT o.id FROM lead_orders o WHERE o.seller_id = ? AND o.status='paid' AND o.mode='live'
+        AND o.quantity > (SELECT count(*) FROM lead_credit_usage u WHERE u.order_id=o.id) ORDER BY o.created_at,o.id LIMIT 1`;
+      const results = await env.DB.batch([env.DB.prepare(`INSERT INTO lead_assignments (id,lead_id,seller_id,consent_ref,assigned_at,updated_at)
         SELECT ?,l.id,s.seller_id,?,?,? FROM assigned_leads l JOIN approved_sellers s ON s.seller_id = ? AND s.status = 'approved'
         WHERE l.id = ? AND l.expires_at > ? AND (SELECT count(*) FROM lead_assignments WHERE lead_id = l.id) < 3
-        ON CONFLICT(lead_id,seller_id) DO NOTHING`).bind(crypto.randomUUID(), consent, now, now, seller, id, now).run();
-      if (!result.meta.changes) return reply({ ok: false, message: '중복 배정, 3명 한도, 만료 또는 판매자 승인 상태를 확인해주세요.' }, 409);
+        AND EXISTS (${available})
+        ON CONFLICT(lead_id,seller_id) DO NOTHING`).bind(assignmentId, consent, now, now, seller, id, now, seller),
+        env.DB.prepare(`INSERT INTO lead_credit_usage(assignment_id,order_id,used_at)
+          SELECT id,(${available}),? FROM lead_assignments WHERE id=?`).bind(seller, now, assignmentId)]);
+      if (!results[0].meta.changes) return reply({ ok: false, message: '잔여 구매 건수, 중복 배정, 3명 한도 또는 판매자 승인 상태를 확인해주세요.' }, 409);
       return reply({ ok: true });
     }
     if (actor.admin && parts[2] === 'revoke' && method === 'POST') {
@@ -155,7 +167,7 @@ export async function handleLeads(env, request, path, actor) {
       }
       const row = actor.admin
         ? await env.DB.prepare('SELECT l.* FROM assigned_leads l WHERE l.id = ? AND l.expires_at > ?').bind(id, now).first()
-        : await env.DB.prepare("SELECT l.* FROM assigned_leads l JOIN lead_assignments a ON a.lead_id = l.id WHERE l.id = ? AND l.expires_at > ? AND a.seller_id = ? AND a.revoked_at = ''").bind(id, now, actor.sellerId).first();
+        : await env.DB.prepare(`SELECT l.* FROM assigned_leads l JOIN lead_assignments a ON a.lead_id = l.id WHERE l.id = ? AND l.expires_at > ? AND a.seller_id = ? AND a.revoked_at = '' AND ${paidAssignment('a')}`).bind(id, now, actor.sellerId).first();
       if (!row) return reply({ ok: false, message: '열람 권한이 없거나 만료된 고객입니다.' }, 404);
       const phone = await readCustomerPhone(env, row);
       if (!phone) return reply({ ok: false, message: '열람 기간이 종료되었습니다.' }, 410);
@@ -163,7 +175,7 @@ export async function handleLeads(env, request, path, actor) {
       const logged = await env.DB.prepare(`INSERT INTO lead_phone_access (id,lead_id,actor,accessed_at)
         SELECT ?,l.id,?,? FROM assigned_leads l WHERE l.id = ? AND l.expires_at > ?
         AND (? = 1 OR EXISTS (SELECT 1 FROM lead_assignments a JOIN approved_sellers s ON s.seller_id = a.seller_id
-          WHERE a.lead_id = l.id AND a.seller_id = ? AND a.revoked_at = '' AND s.status = 'approved'))`)
+          WHERE a.lead_id = l.id AND a.seller_id = ? AND a.revoked_at = '' AND s.status = 'approved' AND ${paidAssignment('a')}))`)
         .bind(crypto.randomUUID(), actor.admin ? 'admin' : actor.sellerId, checkedAt, id, checkedAt, actor.admin ? 1 : 0, actor.sellerId || '').run();
       if (!logged.meta.changes) return reply({ ok: false, message: '열람 권한이 변경되었습니다.' }, 403);
       return reply({ ok: true, phone, expiresAt: row.expires_at });
@@ -173,8 +185,8 @@ export async function handleLeads(env, request, path, actor) {
       if (!states.includes(body.status) || !Number.isInteger(body.version)) fail('상담 상태를 확인해주세요.');
       const note = field(body.note, 2000); const next = field(body.nextContactAt, 40);
       if (next && !Number.isFinite(Date.parse(next))) fail('재연락 일시를 확인해주세요.');
-      const result = await env.DB.prepare(`UPDATE lead_assignments SET status = ?, note = ?, next_contact_at = ?, updated_at = ?, version = version + 1
-        WHERE lead_id = ? AND seller_id = ? AND revoked_at = '' AND version = ? AND EXISTS (SELECT 1 FROM assigned_leads WHERE id = ? AND expires_at > ?)`)
+      const result = await env.DB.prepare(`UPDATE lead_assignments AS a SET status = ?, note = ?, next_contact_at = ?, updated_at = ?, version = version + 1
+        WHERE lead_id = ? AND seller_id = ? AND revoked_at = '' AND version = ? AND ${paidAssignment('a')} AND EXISTS (SELECT 1 FROM assigned_leads WHERE id = ? AND expires_at > ?)`)
         .bind(body.status, note, next ? new Date(next).toISOString() : '', now, id, actor.sellerId, body.version, id, now).run();
       if (!result.meta.changes) return reply({ ok: false, message: '배정이 변경되었거나 다른 화면에서 수정되었습니다. 새로고침해주세요.' }, 409);
       return reply({ ok: true });

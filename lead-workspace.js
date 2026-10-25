@@ -8,21 +8,22 @@
   let page = 1, rows = [], managers = [], uploadRows = [], generation = 0, loading = false;
   let adminToken = '', phoneTimer = 0;
   const input = (name, label, extra = '') => `<label>${label}<input name="${name}" ${extra}></label>`;
-  root.innerHTML = `<header class="lead-head"><div><h2>${admin ? '고객 DB 배정' : '배정 고객 관리'}</h2><p>최대 3명 공동 배정 · 등록일부터 30일 보관</p></div>${admin ? '<button type="button" data-action="auth">관리자 인증</button><button type="button" class="lead-primary" data-action="create">고객 등록</button>' : ''}</header>
+  root.innerHTML = `<header class="lead-head"><div><h2>${admin ? '고객 DB 배정' : '고객DB'}</h2><p>최대 3명 공동 배정 · 등록일부터 30일 보관</p></div>${admin ? '<button type="button" data-action="auth">관리자 인증</button><button type="button" class="lead-primary" data-action="create">고객 등록</button>' : ''}</header>
     <form class="lead-toolbar"><input name="q" aria-label="고객 검색" placeholder="고객명 · 지역 · 관심 품목" maxlength="80">${admin ? '' : `<select name="status" aria-label="상담 상태"><option value="">전체 상태</option>${Object.entries(labels).map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>`}<button type="submit">검색</button><button type="button" data-action="refresh" aria-label="새로고침" title="새로고침">↻</button></form>
     <p class="lead-message" role="status" aria-live="polite"></p><div class="lead-list"></div>
     <footer class="lead-pager"><button type="button" data-action="prev">이전</button><span></span><button type="button" data-action="next">다음</button></footer>
     <dialog class="lead-dialog"><form method="dialog" class="lead-dialog-close"><button aria-label="닫기" title="닫기">×</button></form><div class="lead-dialog-body"></div></dialog>`;
   const list = root.querySelector('.lead-list'), message = root.querySelector('.lead-message'), dialog = root.querySelector('dialog');
+  if (admin) { const button = document.createElement('button'); button.type = 'button'; button.dataset.action = 'orders'; button.textContent = '결제 내역'; root.querySelector('.lead-head').append(button); }
   const say = text => { message.textContent = text; };
   const clearPhones = () => root.querySelectorAll('[data-phone]').forEach(el => { el.textContent = '***-****-****'; el.removeAttribute('href'); });
   const open = html => { dialog.querySelector('.lead-dialog-body').innerHTML = html; if (!dialog.open) dialog.showModal(); };
-  async function api(path = '', method = 'GET', body, reauth = '') {
+  async function api(path = '', method = 'GET', body, reauth = '', service = 'assigned-leads') {
     const token = admin ? adminToken : sessionStorage.getItem('pickquoteSellerSessionToken');
     if (!token) throw new Error(admin ? '관리자 인증 후 이용해주세요.' : '다시 로그인해주세요.');
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(`/api/assigned-leads${path}`, { method, cache: 'no-store', signal: controller.signal,
+      const response = await fetch(`/api/${service}${path}`, { method, cache: 'no-store', signal: controller.signal,
         headers: { [admin ? 'X-Admin-Token' : 'X-Seller-Session']: token, ...(body ? { 'Content-Type': 'application/json' } : {}), ...(reauth ? { 'X-Admin-Reauth': reauth } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}) });
       const data = await response.json();
@@ -41,6 +42,19 @@
     const version = ++generation; loading = true; clearPhones(); root.setAttribute('aria-busy', 'true');
     list.innerHTML = '<div class="lead-empty" role="status">고객 목록을 불러오는 중입니다.</div>'; say('');
     try {
+      if (!admin) {
+        const access = await api('', 'GET', undefined, '', 'lead-payments');
+        if (version !== generation) return;
+        root.querySelector('.lead-toolbar').hidden = !access.access;
+        root.querySelector('.lead-pager').hidden = !access.access;
+        root.querySelector('.lead-head p').textContent = access.access ? `잔여 ${access.remaining}건 · 등록일부터 30일 보관` : '고객DB 신청 후 배정된 고객을 관리할 수 있습니다.';
+        if (!root.querySelector('.lead-purchase-link')) {
+          const link = document.createElement('a'); link.className = 'lead-purchase-link'; link.href = '/db-checkout'; root.querySelector('.lead-head').append(link);
+        }
+        root.querySelector('.lead-purchase-link').textContent = access.access ? '추가 구매' : 'DB 신청하기';
+        root.querySelector('.lead-head .lead-purchase-link').hidden = !access.access;
+        if (!access.access) { rows = []; list.innerHTML = '<section class="lead-locked"><h3>고객DB</h3><p>1건 <strong>8,000원</strong></p><p>결제 후 관리자가 고객을 배정합니다.</p><a href="/db-checkout" class="lead-purchase-link">DB 신청하기</a></section>'; return; }
+      }
       const fields = new FormData(root.querySelector('.lead-toolbar'));
       const query = new URLSearchParams({ page: String(page), q: fields.get('q') || '', status: fields.get('status') || '' });
       const data = await api(`?${query}`);
@@ -56,6 +70,15 @@
   root.addEventListener('click', async event => {
     const button = event.target.closest('[data-action]'); if (!button) return;
     const action = button.dataset.action;
+    if (action === 'orders' && admin) {
+      button.disabled = true;
+      try {
+        const data = await api('/orders', 'GET', undefined, '', 'lead-payments');
+        const states = { pending: '결제 대기', processing: '승인 확인 중', paid: '결제 완료', cancelled: '취소', partialCancelled: '부분 취소', failed: '실패', expired: '만료', ready: '대기' };
+        open(`<h3>결제 내역</h3>${data.rows.length ? data.rows.map(o => `<p><b>${esc(o.seller_id)}</b> · ${o.quantity}건 · ${o.amount.toLocaleString('ko-KR')}원<br>${esc(states[o.status] || o.status)}${o.mode === 'sandbox' ? ' (테스트)' : ''} · ${date(o.created_at)}</p>`).join('') : '<p>결제 내역이 없습니다.</p>'}`);
+      } catch (error) { say(error.message); } finally { button.disabled = false; }
+      return;
+    }
     const row = rows.find(r => r.id === button.closest('[data-id]')?.dataset.id);
     if (action === 'auth') { open(`<h3>관리자 인증</h3><form data-form="auth">${input('token', '관리자 토큰', 'type="password" autocomplete="off" required')}<button class="lead-primary">확인</button></form>`); return; }
     if (action === 'create') {
@@ -68,8 +91,8 @@
     button.disabled = true;
     try {
       if (action === 'assign') {
-        managers = (await api('/managers')).rows;
-        open(`<h3>${esc(row.name)} · 매니저 배정</h3><form data-form="assign" data-id="${esc(row.id)}"><label>매니저<select name="sellerId" required><option value="">매니저 선택</option>${managers.map(m => `<option value="${esc(m.seller_id)}">${esc([m.channel, m.branch, m.manager, m.seller_id].join(' · '))}</option>`).join('')}</select></label>${input('consentRef', '해당 매니저 제공 동의 증빙 번호', 'maxlength="300" required')}<label class="lead-check"><input type="checkbox" name="consent" required>선택한 매니저에게 제공할 수 있는 동의를 확인했습니다.</label><p>배정 단가 8,000원 · 결제 미연동</p><button class="lead-primary">배정</button></form>`);
+        managers = (await api('/managers')).rows.filter(manager => manager.remaining > 0);
+        open(`<h3>${esc(row.name)} · 매니저 배정</h3><form data-form="assign" data-id="${esc(row.id)}"><label>매니저<select name="sellerId" required><option value="">잔여 구매 건수가 있는 매니저 선택</option>${managers.map(m => `<option value="${esc(m.seller_id)}">${esc([m.channel, m.branch, m.manager, m.seller_id].join(' · '))} · 잔여 ${m.remaining}건</option>`).join('')}</select></label>${input('consentRef', '해당 매니저 제공 동의 증빙 번호', 'maxlength="300" required')}<label class="lead-check"><input type="checkbox" name="consent" required>선택한 매니저에게 제공할 수 있는 동의를 확인했습니다.</label><p>배정 시 구매 건수 1건이 차감됩니다. 회수·삭제해도 자동 환급되지 않습니다.</p><button class="lead-primary">배정</button></form>`);
       } else if (action === 'phone') {
         if (admin) { open(`<h3>연락처 열람 인증</h3><form data-form="phone" data-id="${esc(row.id)}">${input('token', '관리자 토큰 재입력', 'type="password" autocomplete="off" required')}<button class="lead-primary">번호 열람</button></form>`); }
         else await reveal(row.id);
