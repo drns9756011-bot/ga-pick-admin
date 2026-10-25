@@ -31,20 +31,20 @@ body.ops-console :is(button,input,select,textarea) { font-family: inherit; }
 .ops-skip-link:focus { top: 12px; }
 
 /* Navigation is kept independent of each domain's forms and tables. */
-body.ops-console .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 60; display: flex; flex-direction: column; width: var(--ops-sidebar); height: 100dvh; min-height: 0; padding: calc(20px + env(safe-area-inset-top,0px)) 14px calc(16px + env(safe-area-inset-bottom,0px)); gap: 0; background: #fff; color: var(--ops-ink); border-right: 1px solid var(--ops-line); overflow-y: auto; box-shadow: none; }
-body.ops-console .brand { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 10px; color: var(--ops-navy); font-size: 19px; font-weight: 800; }
+body.ops-console .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 60; display: flex; flex-direction: column; width: var(--ops-sidebar); height: 100dvh; min-height: 0; padding: calc(20px + env(safe-area-inset-top,0px)) 14px calc(16px + env(safe-area-inset-bottom,0px)); gap: 0; background: #fff; color: var(--ops-ink); border-right: 1px solid var(--ops-line); overflow: hidden; box-shadow: none; }
+body.ops-console .brand { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 10px; color: var(--ops-navy); font-size: 19px; font-weight: 800; }
 body.ops-console .brand-mark { display: block; flex: 0 0 34px; width: 34px; height: 34px; background: #fff url('/pickquote-admin-symbol.png') center / contain no-repeat; border: 0; border-radius: 0; color: transparent; font-size: 0; box-shadow: none; }
 body.ops-console .brand span:last-child { display: block; }
 body.ops-console .brand small { display: block; color: var(--ops-muted); font-size: 11px; font-weight: 500; }
-body.ops-console .side-nav { display: flex; flex-direction: column; align-items: stretch; gap: 3px; flex: 1; margin: 24px 0 16px; padding: 0; min-height: 0; height: auto; overflow: visible; background: none; white-space: normal; }
-body.ops-console .nav-label { display: block; margin: 22px 11px 7px; color: var(--ops-muted); font-size: 11px; font-weight: 600; }
+body.ops-console .side-nav { display: flex; flex-direction: column; align-items: stretch; gap: 3px; flex: 1; margin: 24px 0 16px; padding: 0; min-height: 0; height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; background: none; white-space: normal; }
+body.ops-console .nav-label { display: block; flex: 0 0 auto; margin: 22px 11px 7px; color: var(--ops-muted); font-size: 11px; font-weight: 600; }
 body.ops-console .nav-label:first-child { margin-top: 0; }
 body.ops-console .side-nav a { position: relative; display: flex; align-items: center; gap: 11px; flex: 0 0 auto; min-height: 40px; margin: 0; padding: 9px 11px; background: none; border: 0; border-radius: 5px; color: #5a6571; font-size: 13px; font-weight: 600; white-space: normal; }
 body.ops-console .side-nav a::before { content: none; }
 body.ops-console .side-nav a:hover { background: #f5f6f8; color: var(--ops-navy); }
 body.ops-console .side-nav a:is(.is-active,[aria-current=page]) { color: var(--ops-navy); background: #ecf1f7; font-weight: 750; }
 .ops-nav-count { margin-left: auto; min-width: 19px; padding: 1px 5px; border-radius: 4px; background: var(--ops-navy); color: #fff; font-size: 10px; text-align: center; }
-body.ops-console .home-link { display: flex; align-items: center; gap: 10px; margin: 0; padding: 16px 11px 0; color: var(--ops-muted); font-size: 12px; background: none; border: 0; border-top: 1px solid var(--ops-line); border-radius: 0; }
+body.ops-console .home-link { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; margin: 0; padding: 16px 11px 0; color: var(--ops-muted); font-size: 12px; background: none; border: 0; border-top: 1px solid var(--ops-line); border-radius: 0; }
 .ops-drawer-close { display: none; }
 body.ops-console .admin-shell { display: flex; flex-direction: column; gap: 28px; width: auto; max-width: none; min-width: 0; min-height: 100dvh; margin: 0 0 0 var(--ops-sidebar); padding: 0 32px 40px; }
 body.ops-console .admin-header { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 30; min-height: 80px; margin: 0 -32px; padding: calc(18px + env(safe-area-inset-top,0px)) 32px 18px; gap: 20px; border: 0; border-bottom: 1px solid var(--ops-line); border-radius: 0; background: #fff; box-shadow: none; }
