@@ -1585,6 +1585,15 @@ function solapiMessageStatus(message) {
   return null;
 }
 
+async function readSolapiMessages(env, url) {
+  // SOLAPI rejects replayed signatures, including signatures reused within one batch.
+  const date = new Date().toISOString();
+  const salt = createSolapiSalt();
+  const signature = await hmacSha256Hex(env.SOLAPI_API_SECRET, date + salt);
+  const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
+  return fetch(url, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000) });
+}
+
 async function refreshAlimtalkStatus(env, id) {
   await ensureAlimtalkColumns(env);
   const existing = await env.DB.prepare("SELECT * FROM alimtalk_queue WHERE id = ?").bind(id).first();
@@ -1597,15 +1606,11 @@ async function refreshAlimtalkStatus(env, id) {
     return json({ ok: false, message: "솔라피 조회 인증 정보가 설정되지 않았습니다." }, 503);
   }
 
-  const date = new Date().toISOString();
-  const salt = createSolapiSalt();
-  const signature = await hmacSha256Hex(String(env.SOLAPI_API_SECRET).trim(), date + salt);
-  const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
   const lookup = new URL("https://api.solapi.com/messages/v4/list");
   if (row.solapiMessageId) lookup.searchParams.set("messageIds", JSON.stringify([row.solapiMessageId]));
   else lookup.searchParams.set("groupId", row.solapiGroupId);
   lookup.searchParams.set("limit", "100");
-  const response = await fetch(lookup, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000) });
+  const response = await readSolapiMessages(env, lookup);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: payload.errorMessage || payload.message || "솔라피 조회에 실패했습니다." }, 502);
   const messageList = payload.messageList || {};
@@ -1615,9 +1620,7 @@ async function refreshAlimtalkStatus(env, id) {
     : messages.length === 1 ? messages[0] : null;
   let groupCount = 0;
   if (!message && row.solapiGroupId) {
-    const groupResponse = await fetch(`https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapiGroupId)}/messages?limit=100`, {
-      headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000),
-    });
+    const groupResponse = await readSolapiMessages(env, `https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapiGroupId)}/messages?limit=100`);
     const groupPayload = await groupResponse.json().catch(() => ({}));
     if (!groupResponse.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: groupPayload.errorMessage || groupPayload.message || "솔라피 그룹 조회에 실패했습니다." }, 502);
     const list = groupPayload.messageList || {};
@@ -1661,10 +1664,6 @@ async function refreshPendingAlimtalkBatch(env, request) {
   if (!env.SOLAPI_API_KEY || !env.SOLAPI_API_SECRET) {
     return json({ ok: false, message: "솔라피 조회 인증 정보가 설정되지 않았습니다." }, 503);
   }
-  const date = new Date().toISOString();
-  const salt = createSolapiSalt();
-  const signature = await hmacSha256Hex(String(env.SOLAPI_API_SECRET).trim(), date + salt);
-  const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
   const oldest = new Date(rows.at(-1).created_at);
   if (Number.isNaN(oldest.valueOf())) {
     return json({ ok: false, message: "알림톡 기록의 생성 시각을 확인할 수 없습니다." }, 409);
@@ -1679,7 +1678,7 @@ async function refreshPendingAlimtalkBatch(env, request) {
     url.searchParams.set("endDate", new Date().toISOString());
     url.searchParams.set("limit", "500");
     if (startKey) url.searchParams.set("startKey", startKey);
-    const response = await fetch(url, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000) });
+    const response = await readSolapiMessages(env, url);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: payload.errorMessage || payload.message || "솔라피 목록 조회에 실패했습니다." }, 502);
     Object.assign(messages, payload.messageList || {});
@@ -1696,9 +1695,7 @@ async function refreshPendingAlimtalkBatch(env, request) {
     let message = messages[row.solapi_message_id];
     if (!message && row.solapi_group_id) {
       if (!groupResults.has(row.solapi_group_id)) {
-        const response = await fetch(`https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapi_group_id)}/messages?limit=100`, {
-          headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000),
-        });
+        const response = await readSolapiMessages(env, `https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapi_group_id)}/messages?limit=100`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: payload.errorMessage || payload.message || "솔라피 그룹 조회에 실패했습니다." }, 502);
         const list = payload.messageList || {};

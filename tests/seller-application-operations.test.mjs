@@ -195,7 +195,10 @@ test("missing list results are reconciled using exact group message IDs without 
   const state = makeEnv();
   const originalFetch = globalThis.fetch;
   const paths = [];
+  const signatures = new Set();
   globalThis.fetch = async (url, options) => {
+    assert.ok(!signatures.has(options.headers.Authorization), "every provider GET needs a new signature");
+    signatures.add(options.headers.Authorization);
     const path = new URL(url).pathname;
     paths.push(path);
     assert.ok(!options.method || options.method === "GET");
