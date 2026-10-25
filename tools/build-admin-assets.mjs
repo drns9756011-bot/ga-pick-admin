@@ -16,7 +16,7 @@ const files = [
   "favicon.ico", "favicon.svg", "favicon.png", "favicon-16x16.png",
   "favicon-32x32.png", "favicon-48x48.png", "favicon-64x64.png",
   "apple-touch-icon.png", "pickquote-admin-symbol.png", "site.webmanifest",
-  "robots.txt", "sitemap.xml",
+  "robots.txt", "sitemap.xml", "_headers",
 ];
 const directories = [
   "alimtalk", "approved-sellers", "brand-hall", "customers",

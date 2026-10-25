@@ -27,8 +27,13 @@
     return svg;
   }
   function decorate() {
+    const currentPath = location.pathname.replace(/\/+$/, '') || '/';
     sidebar.querySelectorAll('.side-nav a').forEach((link) => {
       const path = new URL(link.href).pathname.replace(/\/+$/, '') || '/';
+      const active = path === (currentPath === '/admin.html' ? '/' : currentPath);
+      link.classList.toggle('is-active', active);
+      if (active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
       if (!link.querySelector('.ops-icon')) link.prepend(icon(navIcons[path]));
     });
     const home = sidebar.querySelector('.home-link');

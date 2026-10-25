@@ -8,16 +8,16 @@ test('all shared admin routes use the same source and current assets', () => {
   for (const route of ['admin.html', 'customers', 'sellers', 'approved-sellers', 'seller-access', 'brand-hall', 'alimtalk']) {
     assert.equal(read(route.endsWith('.html') ? route : `${route}/index.html`), source);
   }
-  assert.match(source, /admin-workspace\.css\?v=20261007-workbench/);
+  assert.match(source, /admin-workspace\.css\?v=20261025-mobile-shell/);
   assert.doesNotMatch(source, /class="eyebrow"|dashboard-link-card/);
 });
 test('standalone tools share the navigation, font and icon assets', () => {
-  for (const route of ['anonymous-chat', 'anonymous-consultation', 'subscription-products']) {
+  for (const route of ['anonymous-chat', 'anonymous-consultation', 'subscription-products', 'lead-customers']) {
     const html = read(`${route}/index.html`);
     assert.match(html, /suit-variable\.woff2/);
     assert.match(html, /admin-icon-nodes\.js/);
     assert.match(html, /\/brand-hall/);
-    assert.match(html, /admin-workspace\.js\?v=20261007-workbench/);
+    assert.match(html, /admin-workspace\.js\?v=20261025-mobile-shell/);
   }
 });
 test('workspace uses local typography and constrained mobile navigation', () => {
@@ -29,6 +29,23 @@ test('workspace uses local typography and constrained mobile navigation', () => 
   assert.match(js, /sidebar\.inert = mobile\.matches && !opened/);
   assert.match(js, /main\.inert = opened/);
   assert.match(js, /event\.key === 'Escape'/);
+  assert.match(css, /padding-top: var\(--ops-mobile-height\)/);
+  assert.match(css, /height: var\(--ops-mobile-height\)/);
+  assert.match(js, /link\.classList\.toggle\('is-active', active\)/);
+});
+
+test('customer DB tool uses the same shell instead of its legacy horizontal nav', () => {
+  const html = read('lead-customers/index.html');
+  assert.match(html, /class="ops-console"/);
+  assert.match(html, /class="admin-shell"/);
+  assert.match(html, /class="sidebar"/);
+  assert.doesNotMatch(html, /class="lead-admin-nav"/);
+  assert.match(read('tools/sync-admin-pages.mjs'), /lead-customers\/index.html/);
+});
+
+test('admin UI documents and scripts cannot reuse a stale cached shell', () => {
+  assert.match(read('_headers'), /\/\*\s+Cache-Control: no-store/);
+  assert.match(read('tools/build-admin-assets.mjs'), /"_headers"/);
 });
 test('dashboard has record-driven queues without customer phone output', () => {
   const js = read('admin.js');

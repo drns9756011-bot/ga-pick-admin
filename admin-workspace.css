@@ -31,12 +31,12 @@ body.ops-console :is(button,input,select,textarea) { font-family: inherit; }
 .ops-skip-link:focus { top: 12px; }
 
 /* Navigation is kept independent of each domain's forms and tables. */
-body.ops-console .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 60; display: flex; flex-direction: column; width: var(--ops-sidebar); height: 100dvh; min-height: 0; padding: calc(20px + env(safe-area-inset-top,0px)) 14px calc(16px + env(safe-area-inset-bottom,0px)); gap: 0; background: #fff; color: var(--ops-ink); border-right: 1px solid var(--ops-line); overflow: hidden; box-shadow: none; }
+body.ops-console .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 60; display: flex; flex-direction: column; align-items: stretch; width: var(--ops-sidebar); height: 100dvh; min-height: 0; padding: calc(20px + env(safe-area-inset-top,0px)) 14px calc(16px + env(safe-area-inset-bottom,0px)); gap: 0; background: #fff; color: var(--ops-ink); border-right: 1px solid var(--ops-line); overflow: hidden; box-shadow: none; }
 body.ops-console .brand { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 10px; color: var(--ops-navy); font-size: 19px; font-weight: 800; }
 body.ops-console .brand-mark { display: block; flex: 0 0 34px; width: 34px; height: 34px; background: #fff url('/pickquote-admin-symbol.png') center / contain no-repeat; border: 0; border-radius: 0; color: transparent; font-size: 0; box-shadow: none; }
 body.ops-console .brand span:last-child { display: block; }
 body.ops-console .brand small { display: block; color: var(--ops-muted); font-size: 11px; font-weight: 500; }
-body.ops-console .side-nav { display: flex; flex-direction: column; align-items: stretch; gap: 3px; flex: 1; margin: 24px 0 16px; padding: 0; min-height: 0; height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; background: none; white-space: normal; }
+body.ops-console .side-nav { display: flex; order: 0; width: 100%; flex-direction: column; align-items: stretch; gap: 3px; flex: 1; margin: 24px 0 16px; padding: 0; min-height: 0; height: auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; background: none; white-space: normal; }
 body.ops-console .nav-label { display: block; flex: 0 0 auto; margin: 22px 11px 7px; color: var(--ops-muted); font-size: 11px; font-weight: 600; }
 body.ops-console .nav-label:first-child { margin-top: 0; }
 body.ops-console .side-nav a { position: relative; display: flex; align-items: center; gap: 11px; flex: 0 0 auto; min-height: 40px; margin: 0; padding: 9px 11px; background: none; border: 0; border-radius: 5px; color: #5a6571; font-size: 13px; font-weight: 600; white-space: normal; }
@@ -44,7 +44,7 @@ body.ops-console .side-nav a::before { content: none; }
 body.ops-console .side-nav a:hover { background: #f5f6f8; color: var(--ops-navy); }
 body.ops-console .side-nav a:is(.is-active,[aria-current=page]) { color: var(--ops-navy); background: #ecf1f7; font-weight: 750; }
 .ops-nav-count { margin-left: auto; min-width: 19px; padding: 1px 5px; border-radius: 4px; background: var(--ops-navy); color: #fff; font-size: 10px; text-align: center; }
-body.ops-console .home-link { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; margin: 0; padding: 16px 11px 0; color: var(--ops-muted); font-size: 12px; background: none; border: 0; border-top: 1px solid var(--ops-line); border-radius: 0; }
+body.ops-console .home-link { display: flex; order: 0; width: 100%; flex: 0 0 auto; align-items: center; gap: 10px; margin: 0; padding: 16px 11px 0; color: var(--ops-muted); font-size: 12px; background: none; border: 0; border-top: 1px solid var(--ops-line); border-radius: 0; }
 .ops-drawer-close { display: none; }
 body.ops-console .admin-shell { display: flex; flex-direction: column; gap: 28px; width: auto; max-width: none; min-width: 0; min-height: 100dvh; margin: 0 0 0 var(--ops-sidebar); padding: 0 32px 40px; }
 body.ops-console .admin-header { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 30; min-height: 80px; margin: 0 -32px; padding: calc(18px + env(safe-area-inset-top,0px)) 32px 18px; gap: 20px; border: 0; border-bottom: 1px solid var(--ops-line); border-radius: 0; background: #fff; box-shadow: none; }
@@ -259,7 +259,9 @@ body.ops-console .toast { z-index: 160; border-radius: 6px; background: #20262d;
   body.ops-console .message-top { grid-row: auto; }
 }
 @media(max-width:760px) {
-  .ops-mobile-bar { display: flex; position: sticky; top: 0; z-index: 50; align-items: center; gap: 12px; min-height: 58px; padding: calc(10px + env(safe-area-inset-top,0px)) 16px 10px; background: #fff; border-bottom: 1px solid var(--ops-line); }
+  body.ops-console { --ops-mobile-height: calc(60px + env(safe-area-inset-top,0px)); padding-top: var(--ops-mobile-height); }
+  html:has(body.ops-console) { scroll-padding-top: calc(76px + env(safe-area-inset-top,0px)); }
+  .ops-mobile-bar { display: flex; position: fixed; inset: 0 0 auto; z-index: 50; align-items: center; gap: 12px; height: var(--ops-mobile-height); padding: calc(10px + env(safe-area-inset-top,0px)) 16px 10px; background: #fff; border-bottom: 1px solid var(--ops-line); box-sizing: border-box; }
   .ops-mobile-bar button,.ops-drawer-close { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--ops-line); border-radius: 5px; background: #fff; color: var(--ops-navy); }
   .ops-mobile-bar strong { color: var(--ops-navy); font-size: 15px; font-weight: 750; }
   .ops-mobile-bar small { margin-left: auto; font-size: 11px; color: var(--ops-muted); }
@@ -269,6 +271,12 @@ body.ops-console .toast { z-index: 160; border-radius: 6px; background: #20262d;
   body.ops-console.ops-menu-open .ops-drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 55; width: 100%; height: 100%; padding: 0; border: 0; background: #20262d66; }
   body.ops-console.ops-menu-open { overflow: hidden; }
   body.ops-console .admin-shell { width: 100%; margin: 0; padding: 0 16px calc(28px + env(safe-area-inset-bottom,0px)); gap: 22px; }
+  body.ops-console .admin-shell > * { min-width: 0; max-width: 100%; }
+  body.ops-console :is(.consult-wrap,.chat-admin-wrap) { min-width: 0; }
+  body.ops-console #leadWorkspace { padding-top: 20px; }
+  body.ops-console .lead-head > div { flex-basis: 100%; }
+  body.ops-console .lead-head h2 { font-size: 21px; font-weight: 750; }
+  body.ops-console .lead-row { grid-template-columns: minmax(0,1fr); gap: 16px; }
   body.ops-console .admin-header { position: static; min-height: 0; margin: 0 -16px; padding: 20px 16px; gap: 14px; flex-wrap: wrap; }
   body.ops-console .admin-header h1 { font-size: 21px; }
   body.ops-console .admin-actions { width: 100%; gap: 8px; }
