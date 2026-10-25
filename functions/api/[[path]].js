@@ -1646,7 +1646,7 @@ async function refreshPendingAlimtalkBatch(env, request) {
   let cursor = [];
   try { cursor = JSON.parse(String(body.cursor || "[]")); } catch { cursor = []; }
   if (!Array.isArray(cursor) || cursor.length !== 2) cursor = [];
-  const limit = Math.min(100, Math.max(1, Number(body.limit) || 10));
+  const limit = Math.min(20, Math.max(1, Number(body.limit) || 10));
   const query = cursor.length
     ? env.DB.prepare(`SELECT id, status, solapi_group_id, solapi_message_id, created_at, sent_at FROM alimtalk_queue
         WHERE status IN ('ready', 'accepted', 'sending') AND solapi_message_id != ''
@@ -1689,9 +1689,26 @@ async function refreshPendingAlimtalkBatch(env, request) {
   }
   const statements = [];
   let matched = 0;
+  // Some accepted messages are absent from the general list but retained in their send group.
+  // Only an exact message ID match may change an existing delivery status.
+  const groupResults = new Map();
   for (const row of rows) {
-    const message = messages[row.solapi_message_id];
+    let message = messages[row.solapi_message_id];
+    if (!message && row.solapi_group_id) {
+      if (!groupResults.has(row.solapi_group_id)) {
+        const response = await fetch(`https://api.solapi.com/messages/v4/groups/${encodeURIComponent(row.solapi_group_id)}/messages?limit=100`, {
+          headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) return json({ ok: false, code: "SOLAPI_LOOKUP_FAILED", message: payload.errorMessage || payload.message || "솔라피 그룹 조회에 실패했습니다." }, 502);
+        const list = payload.messageList || {};
+        groupResults.set(row.solapi_group_id, Array.isArray(list)
+          ? Object.fromEntries(list.map((item) => [item.messageId, item])) : list);
+      }
+      message = groupResults.get(row.solapi_group_id)[row.solapi_message_id];
+    }
     if (!message) continue;
+    missing.delete(row.solapi_message_id);
     matched += 1;
     const outcome = solapiMessageStatus(message);
     if (!outcome) continue;

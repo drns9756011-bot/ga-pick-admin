@@ -190,3 +190,42 @@ test("automatic reconciliation does not query provider during Korean quiet hours
     assert.equal((await response.json()).paused, true);
   } finally { Date.now = originalNow; globalThis.fetch = originalFetch; }
 });
+
+test("missing list results are reconciled using exact group message IDs without resending", async () => {
+  const state = makeEnv();
+  const originalFetch = globalThis.fetch;
+  const paths = [];
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(url).pathname;
+    paths.push(path);
+    assert.ok(!options.method || options.method === "GET");
+    if (path === "/messages/v4/list") return Response.json({ messageList: {} });
+    assert.equal(path, "/messages/v4/groups/group-1/messages");
+    return Response.json({ messageList: { "message-1": { messageId: "message-1", statusCode: "4000" } } });
+  };
+  try {
+    const response = await onRequest({
+      request: new Request("https://admin.example/api/alimtalk/refresh-batch", { method: "POST", headers: { "X-Admin-Token": "test-token" }, body: "{}" }),
+      env: state.env, params: { path: ["alimtalk", "refresh-batch"] },
+    });
+    const payload = await response.json();
+    assert.equal(payload.updated, 1);
+    assert.equal(payload.missing, 0);
+    assert.equal(state.message.status, "sent");
+    assert.equal(paths.length, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("unrelated group messages cannot mark a missing message as delivered", async () => {
+  const state = makeEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ messageList: { unrelated: { messageId: "unrelated", statusCode: "4000" } } });
+  try {
+    const response = await onRequest({
+      request: new Request("https://admin.example/api/alimtalk/talk-1/refresh", { method: "POST", headers: { "X-Admin-Token": "test-token" } }),
+      env: state.env, params: { path: ["alimtalk", "talk-1", "refresh"] },
+    });
+    assert.equal(response.status, 409);
+    assert.equal(state.message.status, "accepted");
+  } finally { globalThis.fetch = originalFetch; }
+});
