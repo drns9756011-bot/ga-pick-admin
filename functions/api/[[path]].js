@@ -1585,13 +1585,20 @@ function solapiMessageStatus(message) {
   return null;
 }
 
-async function readSolapiMessages(env, url) {
+async function readSolapiMessages(env, url, attempt = 0) {
   // SOLAPI rejects replayed signatures, including signatures reused within one batch.
   const date = new Date().toISOString();
   const salt = createSolapiSalt();
   const signature = await hmacSha256Hex(env.SOLAPI_API_SECRET, date + salt);
   const authorization = `HMAC-SHA256 apiKey=${String(env.SOLAPI_API_KEY).trim()}, date=${date}, salt=${salt}, signature=${signature}`;
-  return fetch(url, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000) });
+  const response = await fetch(url, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(15000) });
+  if (response.status === 429 && attempt < 2) {
+    const seconds = Number(response.headers.get("x-retry-after") || response.headers.get("Retry-After")) || 5;
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, Math.min(30000, Math.max(100, seconds * 1000 + 100))));
+    return readSolapiMessages(env, url, attempt + 1);
+  }
+  return response;
 }
 
 async function refreshAlimtalkStatus(env, id) {
