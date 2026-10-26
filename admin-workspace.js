@@ -109,5 +109,9 @@
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   mobile.addEventListener('change', () => setOpen(false, false));
+  window.addEventListener('pageshow', () => {
+    setOpen(false, false);
+    decorate();
+  });
   setOpen(false, false);
 })();

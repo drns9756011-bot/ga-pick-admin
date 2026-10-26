@@ -1,10 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const version = '20261025-mobile-shell';
+const version = '20261026-history-shell';
 const source = await readFile(new URL('index.html', root), 'utf8');
-const template = source.replace(/\s*<p class="eyebrow">[^<]*<\/p>/g, '')
+let template = source.replace(/\s*<p class="eyebrow">[^<]*<\/p>/g, '')
   .replace(/\/(admin(?:-workspace)?\.(?:css|js)|vendor\/admin-icon-nodes\.js)\?v=[^"\s]+/g, `/$1?v=${version}`);
+if (!template.includes('/admin-release.js')) template = template.replace('</head>', `<script defer src="/admin-release.js?v=${version}"></script>\n</head>`);
 await writeFile(new URL('index.html', root), template);
 const sidebar = template.match(/<aside class="sidebar">[\s\S]*?<\/aside>/)?.[0];
 if (!sidebar) throw new Error('Shared administrator navigation is missing');
@@ -23,5 +24,6 @@ for (const path of tools) {
     .replace(/\/(admin(?:-workspace)?\.(?:css|js)|vendor\/admin-icon-nodes\.js)\?v=[^"\s]+/g, `/$1?v=${version}`);
   if (!html.includes('/vendor/admin-icon-nodes.js')) html = html.replace('<script defer src="/admin-workspace.js', `<script defer src="/vendor/admin-icon-nodes.js?v=${version}"></script>\n<script defer src="/admin-workspace.js`);
   if (!html.includes('rel="preload"')) html = html.replace('</head>', '<link rel="preload" href="/assets/suit-variable.woff2" as="font" type="font/woff2" crossorigin />\n</head>');
+  if (!html.includes('/admin-release.js')) html = html.replace('</head>', `<script defer src="/admin-release.js?v=${version}"></script>\n</head>`);
   await writeFile(new URL(path, root), html);
 }
