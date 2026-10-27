@@ -18,7 +18,7 @@ const PUBLIC_API_BASE = "https://ga-pick.com";
 if (!document.querySelector('.side-nav a[href="/lead-customers"]')) {
   const link = document.createElement('a');
   link.href = '/lead-customers';
-  link.textContent = '고객 DB 배정';
+  link.textContent = '고객DB 관리';
   document.querySelector('.side-nav')?.append(link);
 }
 localStorage.removeItem("pickquoteDeletedQuoteLogs");
@@ -1521,7 +1521,7 @@ function renderDashboardWorkQueue() {
   dashboardHome.innerHTML = `
     <div class="ops-overview">
       <section aria-labelledby="opsWorkTitle">
-        <div class="system-panel-head"><h2 id="opsWorkTitle">확인이 필요한 업무</h2></div>
+        <div class="system-panel-head"><h2 id="opsWorkTitle">확인이 필요한 업무</h2><a class="ops-link" href="/lead-customers">고객DB 관리 <span data-ops-icon="ChevronRight"></span></a></div>
         <div class="ops-workload">${workRows.map((row) => `<a href="${row.href}" data-admin-nav="${row.page}"><span>${escapeHTML(row.label)}</span><b>${Number(row.count).toLocaleString("ko-KR")}<small>건</small></b></a>`).join('')}</div>
       </section>
       <div class="ops-dashboard-split">

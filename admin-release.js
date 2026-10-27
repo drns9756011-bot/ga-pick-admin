@@ -1,5 +1,5 @@
 (() => {
-  const release = '20261026-history-shell';
+  const release = '20261027-db-management';
   let checking = false;
   window.addEventListener('pageshow', async (event) => {
     if (!event.persisted || checking) return;

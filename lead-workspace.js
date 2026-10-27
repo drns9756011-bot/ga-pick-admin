@@ -8,7 +8,7 @@
   let page = 1, rows = [], managers = [], uploadRows = [], generation = 0, loading = false;
   let adminToken = '', phoneTimer = 0;
   const input = (name, label, extra = '') => `<label>${label}<input name="${name}" ${extra}></label>`;
-  root.innerHTML = `<header class="lead-head"><div><h2>${admin ? '고객 DB 배정' : '고객DB'}</h2><p>최대 3명 공동 배정 · 등록일부터 30일 보관</p></div>${admin ? '<button type="button" data-action="auth">관리자 인증</button><button type="button" class="lead-primary" data-action="create">고객 등록</button>' : ''}</header>
+  root.innerHTML = `<header class="lead-head"><div><h2>${admin ? '고객DB 관리' : '고객DB'}</h2><p>최대 3명 공동 배정 · 등록일부터 30일 보관</p></div>${admin ? '<button type="button" data-action="auth">관리자 인증</button><button type="button" class="lead-primary" data-action="create">고객 등록</button>' : ''}</header>
     <form class="lead-toolbar"><input name="q" aria-label="고객 검색" placeholder="고객명 · 지역 · 관심 품목" maxlength="80">${admin ? '' : `<select name="status" aria-label="상담 상태"><option value="">전체 상태</option>${Object.entries(labels).map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>`}<button type="submit">검색</button><button type="button" data-action="refresh" aria-label="새로고침" title="새로고침">↻</button></form>
     <p class="lead-message" role="status" aria-live="polite"></p><div class="lead-list"></div>
     <footer class="lead-pager"><button type="button" data-action="prev">이전</button><span></span><button type="button" data-action="next">다음</button></footer>

@@ -8,7 +8,7 @@ test('all shared admin routes use the same source and current assets', () => {
   for (const route of ['admin.html', 'customers', 'sellers', 'approved-sellers', 'seller-access', 'brand-hall', 'alimtalk']) {
     assert.equal(read(route.endsWith('.html') ? route : `${route}/index.html`), source);
   }
-  assert.match(source, /admin-workspace\.css\?v=20261026-history-shell/);
+  assert.match(source, /admin-workspace\.css\?v=20261027-db-management/);
   assert.doesNotMatch(source, /class="eyebrow"|dashboard-link-card/);
 });
 test('standalone tools share the navigation, font and icon assets', () => {
@@ -17,7 +17,7 @@ test('standalone tools share the navigation, font and icon assets', () => {
     assert.match(html, /suit-variable\.woff2/);
     assert.match(html, /admin-icon-nodes\.js/);
     assert.match(html, /\/brand-hall/);
-    assert.match(html, /admin-workspace\.js\?v=20261026-history-shell/);
+    assert.match(html, /admin-workspace\.js\?v=20261027-db-management/);
   }
 });
 test('workspace uses local typography and constrained mobile navigation', () => {
